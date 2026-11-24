@@ -88,3 +88,19 @@ spec:
               env:
                 - name: PM_AGENT_LEDGER_EXPORTS_BUCKET
                   value: pm-agent-ledger-exports-prod
+---
+apiVersion: external-secrets.io/v1
+kind: SecretStore
+metadata:
+  name: event-gateway-secret-manager
+spec:
+  provider:
+    gcpsm:
+      projectID: "PLACEHOLDER:Q-10:prod_project_id"
+      auth:
+        workloadIdentity:
+          clusterLocation: us-central1
+          clusterName: pm-agent-prod
+          clusterProjectID: "PLACEHOLDER:Q-10:prod_project_id"
+          serviceAccountRef:
+            name: signal-event-gateway

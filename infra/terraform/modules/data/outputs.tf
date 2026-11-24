@@ -51,3 +51,8 @@ output "secret_ids" {
   description = "secret_id -> secret resource name (workloads get the NAME via env, never the value)."
   value       = { for k, s in google_secret_manager_secret.this : k => s.id }
 }
+
+output "secret_bootstrap_versions" {
+  description = "Depend on this before deploying workloads that mount secrets (Cloud Run secret env / External Secrets)."
+  value       = { for k, v in google_secret_manager_secret_version.placeholder : k => v.name }
+}

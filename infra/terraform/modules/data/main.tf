@@ -459,3 +459,16 @@ resource "google_secret_manager_secret_iam_member" "accessor" {
   role      = "roles/secretmanager.secretAccessor"
   member    = each.value.member
 }
+
+# Bootstrap versions holding PLACEHOLDER tokens (public; the app treats them as "not configured" and fails closed).
+# Rotate in the real value by ADDING a version out-of-band (gcloud secrets versions add). Disable — do not destroy —
+# the bootstrap version afterwards: a destroyed version would be re-created by Terraform as the newest version.
+resource "google_secret_manager_secret_version" "placeholder" {
+  for_each    = { for k, v in var.secret_placeholder_values : k => v if contains(keys(var.secrets), k) }
+  secret      = google_secret_manager_secret.this[each.key].id
+  secret_data = each.value
+
+  lifecycle {
+    ignore_changes = [enabled, secret_data]
+  }
+}

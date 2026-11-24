@@ -93,23 +93,50 @@ locals {
     "dls-catalog-sync"     = { namespace = "pm-agent", ksa = "dls-catalog-sync" }
   }
 
-  # Third-party credentials / webhook secrets: values added out-of-band; readable only by the owning workload.
-  secrets = {
-    "ado-read-credential"        = ["mcp-ado"]
-    "ado-write-credential"       = ["mcp-ado-write"]
-    "servicenow-read-credential" = ["mcp-servicenow"]
-    "pagerduty-read-credential"  = ["mcp-pagerduty"]
-    "msgraph-read-credential"    = ["mcp-msgraph"]
-    "msgraph-send-credential"    = ["mcp-msgraph-write"]
-    "kb-read-credential"         = ["mcp-kb"]
-    "kb-publish-credential"      = ["mcp-kb-write"]
-    "figma-plan-access-token"    = ["mcp-figma", "dls-catalog-sync"]
-    "figma-comments-credential"  = ["mcp-figma-write"]
-    "renderer-plugin-token-key"  = ["svc-prototype-renderer"]
-    "webhook-ado-secret"         = ["signal-event-gateway"]
-    "webhook-servicenow-secret"  = ["signal-event-gateway"]
-    "webhook-pagerduty-secret"   = ["signal-event-gateway"]
-    "webhook-graph-client-state" = ["signal-event-gateway"]
+  # Third-party credentials / webhook secrets: real values added out-of-band; readable only by the owning workload.
+  secrets = merge(
+    {
+      "ado-read-credential"        = ["mcp-ado"]
+      "ado-write-credential"       = ["mcp-ado-write"]
+      "servicenow-read-credential" = ["mcp-servicenow"]
+      "pagerduty-read-credential"  = ["mcp-pagerduty"]
+      "msgraph-read-credential"    = ["mcp-msgraph"]
+      "msgraph-send-credential"    = ["mcp-msgraph-write"]
+      "kb-read-credential"         = ["mcp-kb"]
+      "kb-publish-credential"      = ["mcp-kb-write"]
+      "figma-plan-access-token"    = ["mcp-figma", "dls-catalog-sync"]
+      "figma-comments-credential"  = ["mcp-figma-write"]
+      "renderer-plugin-token-key"  = ["svc-prototype-renderer"]
+      # KMS-wrapped DLP data key used for deterministic pseudonymization by the redacting servers.
+      "sdp-wrapped-key" = local.sdp_services
+    },
+    # Webhook verification secrets: signal-event-gateway ONLY (projected by External Secrets, deploy/k8s).
+    { for sid, _ in local.webhook_secrets : sid => ["signal-event-gateway"] },
+  )
+
+  # secret_id -> env var of signal-event-gateway (src/pm_agent/event_gateway/secrets.py) + bootstrap placeholder.
+  webhook_secrets = {
+    "webhook-ado-basic-username"        = { env = "PM_AGENT_WEBHOOK_ADO_BASIC_USERNAME", placeholder = "PLACEHOLDER:Q-04:ado_webhook_basic_username" }
+    "webhook-ado-basic-password"        = { env = "PM_AGENT_WEBHOOK_ADO_BASIC_PASSWORD", placeholder = "PLACEHOLDER:Q-04:ado_webhook_basic_password" }
+    "webhook-ado-shared-secret"         = { env = "PM_AGENT_WEBHOOK_ADO_SHARED_SECRET", placeholder = "PLACEHOLDER:Q-04:ado_webhook_shared_secret" }
+    "webhook-servicenow-hmac-secret"    = { env = "PM_AGENT_WEBHOOK_SERVICENOW_HMAC_SECRET", placeholder = "PLACEHOLDER:Q-05:servicenow_webhook_hmac_secret" }
+    "webhook-pagerduty-signing-secrets" = { env = "PM_AGENT_WEBHOOK_PAGERDUTY_SIGNING_SECRETS", placeholder = "PLACEHOLDER:Q-07:pagerduty_webhook_signing_secret" }
+    "webhook-msgraph-client-state"      = { env = "PM_AGENT_WEBHOOK_MSGRAPH_CLIENT_STATE", placeholder = "PLACEHOLDER:Q-13:msgraph_subscription_client_state" }
+    "webhook-figma-passcode"            = { env = "PM_AGENT_WEBHOOK_FIGMA_PASSCODE", placeholder = "PLACEHOLDER:Q-02:figma_webhook_passcode" }
+  }
+
+  # Bootstrap versions: public PLACEHOLDER tokens so mounts resolve; the app treats them as not configured.
+  secret_placeholder_values = merge(
+    { for sid, w in local.webhook_secrets : sid => w.placeholder },
+    { "sdp-wrapped-key" = "PLACEHOLDER:Q-10:sdp_wrapped_key" },
+  )
+
+  # Read servers that redact with SDP (deterministic pseudonymization): wrapped key + KMS key, DLP user.
+  sdp_services = ["mcp-ado", "mcp-servicenow", "mcp-pagerduty", "mcp-msgraph", "mcp-figma", "mcp-kb", "mcp-verifier"]
+
+  # Cloud Run secret env projections: service -> { ENV_NAME -> secret }.
+  secret_env_bindings = {
+    for s in local.sdp_services : s => { PM_AGENT_SDP_WRAPPED_KEY = { secret = "sdp-wrapped-key", version = "latest" } }
   }
 
   # Agent Gateway needs these Google APIs registered + allowed once agents are bound to an ENFORCING gateway
@@ -225,7 +252,7 @@ module "kms" {
   approval_token_signers  = [local.run_sa["mcp-ledger"]]
   verifier_report_signers = [local.run_sa["mcp-verifier"]]
   signing_key_viewers     = concat(local.all_sas, local.agent_members)
-  sdp_wrap_decrypters     = ["serviceAccount:${local.sa.dlp}", local.run_sa["mcp-verifier"], local.run_sa["mcp-store"]]
+  sdp_wrap_decrypters     = [for s in local.sdp_services : local.run_sa[s]] # those SAs only (they call DLP with the wrapped key)
 
   depends_on = [google_project_service_identity.agents, google_project_service.apis, module.identity]
 }
@@ -284,8 +311,9 @@ module "data" {
   }
   pubsub_service_agent = local.sa.pubsub
 
-  secrets               = { for sid, owners in local.secrets : sid => [for wl in owners : local.wl_sa[wl]] }
-  kms_key_secretmanager = module.kms.cmek_key_ids["secretmanager"]
+  secrets                   = { for sid, owners in local.secrets : sid => [for wl in owners : local.wl_sa[wl]] }
+  secret_placeholder_values = local.secret_placeholder_values
+  kms_key_secretmanager     = module.kms.cmek_key_ids["secretmanager"]
 
   depends_on = [module.kms, module.identity]
 }
@@ -325,9 +353,11 @@ locals {
     PM_AGENT_APPROVAL_KEY       = module.kms.approval_token_signer_version
   }
 
+  # Secret NAMES a workload reads itself at runtime (secrets projected as env vars are excluded).
   secret_names_by_workload = {
     for wl in keys(local.run_services) : wl => join(",", [
-      for sid, owners in local.secrets : "projects/${var.project_id}/secrets/${sid}" if contains(owners, wl)
+      for sid, owners in local.secrets : "projects/${var.project_id}/secrets/${sid}"
+      if contains(owners, wl) && !contains([for b in values(lookup(local.secret_env_bindings, wl, {})) : b.secret], sid)
     ])
   }
 
@@ -344,6 +374,7 @@ locals {
       contains(["mcp-store", "mcp-ledger", "mcp-verifier"], s) ? local.db_env : {},
       contains(["mcp-store", "pm-workbench", "svc-prototype-renderer"], s) || contains(local.read_connectors, s) ? { PM_AGENT_ARTIFACTS_BUCKET = module.data.artifacts_bucket } : {},
       s == "mcp-ledger" ? { PM_AGENT_LEDGER_LOG = module.logging.ledger_log_name, PM_AGENT_LEDGER_EXPORTS_BUCKET = module.data.ledger_exports_bucket } : {},
+      contains(local.sdp_services, s) ? { PM_AGENT_SDP_KMS_KEY = module.kms.sdp_wrap_key_id } : {},
     )
   }
 
@@ -383,12 +414,25 @@ module "cloud_run" {
   cpu_idle              = each.value.cpu_idle
   session_affinity      = each.value.affinity
   env_vars              = local.service_env[each.key]
+  secret_env_vars       = lookup(local.secret_env_bindings, each.key, {})
   vpc_subnetwork        = module.network.workloads_subnet_id
   vpc_egress            = each.value.egress
   deletion_protection   = var.deletion_protection
   labels                = local.labels
 
-  depends_on = [module.identity, google_project_service_identity.agents]
+  # module.data: secrets, accessor grants and bootstrap versions must exist before Cloud Run projects them.
+  depends_on = [module.identity, module.data, google_project_service_identity.agents, google_project_iam_member.sdp_dlp_user]
+}
+
+# Redacting read servers call SDP with the KMS-wrapped key: roles/dlp.user here, cryptoKeyDecrypter on sdp-wrap in
+# modules/kms (both for local.sdp_services only).
+resource "google_project_iam_member" "sdp_dlp_user" {
+  for_each = toset(local.sdp_services)
+  project  = var.project_id
+  role     = "roles/dlp.user"
+  member   = local.run_sa[each.value]
+
+  depends_on = [module.identity]
 }
 
 # ================================================================= Agent Registry + Agent Gateway + policies (same apply)

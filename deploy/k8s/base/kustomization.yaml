@@ -11,6 +11,7 @@ labels:
 resources:
   - namespace.yaml
   - serviceaccounts.yaml
+  - external-secrets.yaml
   - signal-event-gateway.yaml
   - correlation-engine.yaml
   - dls-catalog-sync.yaml

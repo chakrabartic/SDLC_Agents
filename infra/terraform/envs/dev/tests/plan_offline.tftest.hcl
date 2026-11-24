@@ -53,6 +53,27 @@ run "phase1_dry_run_render_only" {
     condition     = module.platform.access_policies_applied == false
     error_message = "policies must not be bound before the Agent Runtime engines exist"
   }
+
+  assert {
+    condition = alltrue([
+      for sid, owners in module.platform.secret_accessors : join(",", owners) == "signal-event-gateway" if startswith(sid, "webhook-")
+    ]) && length([for sid in keys(module.platform.secret_accessors) : sid if startswith(sid, "webhook-")]) == 7
+    error_message = "the 7 webhook secrets must be readable by signal-event-gateway only"
+  }
+
+  assert {
+    condition     = join(",", module.platform.secret_accessors["sdp-wrapped-key"]) == "mcp-ado,mcp-servicenow,mcp-pagerduty,mcp-msgraph,mcp-figma,mcp-kb,mcp-verifier"
+    error_message = "the SDP wrapped key is for the redacting read servers + verifier only"
+  }
+
+  assert {
+    condition = alltrue([
+      for s, c in module.platform.service_env_contract :
+      (contains(c.secret_env, "PM_AGENT_SDP_WRAPPED_KEY") && contains(c.env, "PM_AGENT_SDP_KMS_KEY")) ==
+      contains(["mcp-ado", "mcp-servicenow", "mcp-pagerduty", "mcp-msgraph", "mcp-figma", "mcp-kb", "mcp-verifier"], s)
+    ])
+    error_message = "PM_AGENT_SDP_WRAPPED_KEY (secret) + PM_AGENT_SDP_KMS_KEY go to the redacting servers only"
+  }
 }
 
 run "phase3_policies_bound" {

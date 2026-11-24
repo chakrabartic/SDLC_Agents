@@ -122,7 +122,7 @@ def requirement_draft() -> RequirementDraft:
                 claim("clm_ac_1", "Late mapping uploads should backfill TIME_SURFACE.", ClaimKind.INFERENCE)]),
             "edge_cases": DraftField(status=FieldStatus.MISSING),
         },
-        near_duplicates=[DuplicateCandidate(ref="2830205", system="ado", similarity=0.91, method="semantic")])
+        near_duplicates=[DuplicateCandidate(ref="1234567", system="ado", similarity=0.91, method="semantic")])
 
 
 def report_for(subject: BaseModel, subject_type: str, *, overall: VerificationOutcome = VerificationOutcome.PASS,
@@ -174,7 +174,7 @@ def product_problem() -> ProductProblem:
                                ClaimKind.FACT,
                                cite("customer CNE asked for an alert when standardized logs are incomplete",
                                     snow=True))],
-        duplicates=[DuplicateCandidate(ref="2830205", system="ado", similarity=0.91, method="semantic")],
+        duplicates=[DuplicateCandidate(ref="1234567", system="ado", similarity=0.91, method="semantic")],
         sources_unavailable=["servicenow"], owner_pm=PersonRef(token="PERSON_PM0001"),
         status=ProblemStatus.GATHERING)
 
@@ -231,7 +231,7 @@ def questions() -> list[ClarifyingQuestion]:
 
 
 def duplicate_candidates() -> list[DuplicateCandidate]:
-    return [DuplicateCandidate(ref="2830205", system="ado", similarity=0.91, method="semantic"),
+    return [DuplicateCandidate(ref="1234567", system="ado", similarity=0.91, method="semantic"),
             DuplicateCandidate(ref="CS0000001", system="servicenow", similarity=0.84, method="minhash"),
             DuplicateCandidate(ref="2830100", system="ado", similarity=0.70, method="semantic",
                                decision=DuplicateDecision.DISTINCT)]

@@ -271,7 +271,7 @@ def test_problem_detail_surface_shows_claims_signals_and_evidence() -> None:
         [button] = kit.buttons(messages, event)
         assert button["action"]["event"]["context"] == {"problemId": problem.problem_id}
     [merge] = kit.buttons(messages, "confirm_merge")
-    assert merge["action"]["event"]["context"] == {"subjectId": problem.problem_id, "candidateRef": "2830205",
+    assert merge["action"]["event"]["context"] == {"subjectId": problem.problem_id, "candidateRef": "1234567",
                                                    "candidateSystem": "ado"}
     [split] = kit.buttons(messages, "split_signal")
     assert split["action"]["event"]["context"] == {"problemId": problem.problem_id,

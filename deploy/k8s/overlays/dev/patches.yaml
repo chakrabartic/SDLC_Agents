@@ -88,3 +88,19 @@ spec:
               env:
                 - name: PM_AGENT_LEDGER_EXPORTS_BUCKET
                   value: chayan-genai-bb-pm-agent-ledger-exports-dev
+---
+apiVersion: external-secrets.io/v1
+kind: SecretStore
+metadata:
+  name: event-gateway-secret-manager
+spec:
+  provider:
+    gcpsm:
+      projectID: "chayan-genai-bb"
+      auth:
+        workloadIdentity:
+          clusterLocation: us-central1
+          clusterName: pm-agent-dev
+          clusterProjectID: "chayan-genai-bb"
+          serviceAccountRef:
+            name: signal-event-gateway

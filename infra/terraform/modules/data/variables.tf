@@ -170,9 +170,19 @@ variable "pubsub_service_agent" {
 
 # ---------------------------------------------------------------- Secret Manager (docs/10 §7)
 variable "secrets" {
-  description = "secret_id -> accessor members (owning workload SAs only). Values are added out-of-band, never through Terraform."
+  description = "secret_id -> accessor members (owning workload SAs only). Real values are added out-of-band, never through Terraform."
   type        = map(list(string))
   default     = {}
+}
+
+variable "secret_placeholder_values" {
+  description = "secret_id -> PLACEHOLDER token written as the bootstrap version (so Cloud Run secret env / External Secrets resolve and the app fails closed on the token until the real value is added as a newer version). Tokens are public, never credentials."
+  type        = map(string)
+  default     = {}
+  validation {
+    condition     = alltrue([for v in values(var.secret_placeholder_values) : can(regex("^PLACEHOLDER:Q-[0-9]{2}:[a-z][a-z0-9_]*$", v))])
+    error_message = "Bootstrap secret values must be PLACEHOLDER:<Q-id>:<snake_case_name> tokens — real secrets never go through Terraform state."
+  }
 }
 
 variable "kms_key_secretmanager" {

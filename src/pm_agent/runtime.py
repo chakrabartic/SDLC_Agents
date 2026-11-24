@@ -19,7 +19,7 @@ from pm_agent.connectors.recording import RecordingWriteBackend
 from pm_agent.correlation import AggregateBuilder, AggregateRecomputer, CorrelationEngine, ProblemRepository
 from pm_agent.correlation.scoring import EmbeddingScorer, LexicalScorer, SimilarityScorer
 from pm_agent.crypto import LocalEcdsaSigner
-from pm_agent.gateway import InProcessToolGateway, ToolServer
+from pm_agent.gateway import InProcessToolGateway
 from pm_agent.grounding import (
     AtomExtractor,
     EntailmentJudge,
@@ -121,6 +121,7 @@ class Services:  # pylint: disable=too-many-instance-attributes
     agent_id: str = LOCAL_AGENT_ID
     connectors: dict[SourceSystem, SourceConnector] = field(default_factory=dict)
     write_backends: dict[str, RecordingWriteBackend] = field(default_factory=dict)
+    write_servers: dict[str, WriteToolServer] = field(default_factory=dict)
     executor: CommitExecutor | None = None
     dls_catalog: DlsCatalog | None = None
     reports: dict[str, VerificationReport] = field(default_factory=dict)
@@ -174,7 +175,7 @@ def build_local_services(settings: Settings | None = None, *, judge: EntailmentJ
                            leeway_seconds=settings.hitl.clock_skew_seconds, clock=clock)
     subjects = InMemorySubjectStore()
     backends: dict[str, RecordingWriteBackend] = {"svc-prototype-renderer": RendererBackend(subjects)}
-    servers: dict[str, ToolServer] = {}
+    servers: dict[str, WriteToolServer] = {}
     for server in sorted(catalog.write_servers()):
         backend = backends.setdefault(server, RecordingWriteBackend(system=server))
         tools = [spec.tool for spec in catalog.specs() if spec.server == server]
@@ -188,7 +189,8 @@ def build_local_services(settings: Settings | None = None, *, judge: EntailmentJ
                     approvals=approvals, identity=identity, commit=InProcessCommitClient(executor),
                     correlation=CorrelationEngine(settings, evidence, problems, make_scorer(settings, atoms)),
                     aggregates=AggregateBuilder(evidence, atoms), near_duplicates=near_dups,
-                    connectors=dict(connectors or {}), write_backends=backends, executor=executor,
+                    connectors=dict(connectors or {}), write_backends=backends, write_servers=servers,
+                    executor=executor,
                     dls_catalog=dls)
 
 

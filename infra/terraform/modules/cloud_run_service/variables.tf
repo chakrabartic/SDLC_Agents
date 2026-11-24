@@ -120,6 +120,15 @@ variable "env_vars" {
   default     = {}
 }
 
+variable "secret_env_vars" {
+  description = "ENV_NAME -> Secret Manager secret projected by Cloud Run (the service SA needs secretAccessor and the version must exist before deploy)."
+  type = map(object({
+    secret  = string
+    version = optional(string, "latest")
+  }))
+  default = {}
+}
+
 variable "vpc_subnetwork" {
   description = "Direct VPC egress subnetwork id (null = no VPC egress)."
   type        = string

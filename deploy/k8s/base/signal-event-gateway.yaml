@@ -49,6 +49,10 @@ spec:
           envFrom:
             - configMapRef:
                 name: pm-agent-env
+            # PM_AGENT_WEBHOOK_* from Secret Manager (ExternalSecret signal-event-gateway-webhooks). Env is read at
+            # start-up: after a rotation, ESO refreshes the Secret (<= 1h) and `kubectl rollout restart` picks it up.
+            - secretRef:
+                name: signal-event-gateway-webhooks
           env:
             - name: PM_AGENT_COMPONENT
               value: signal-event-gateway

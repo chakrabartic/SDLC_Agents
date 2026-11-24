@@ -71,6 +71,7 @@ resource "google_iam_workforce_pool_provider" "slb_oidc" {
     "google.subject"      = "assertion.sub"
     "google.groups"       = "assertion.groups"
     "google.display_name" = "assertion.name"
+    "google.email"        = "assertion.email" # IAP puts `email` in its signed JWT only with this mapping
     "attribute.email"     = "assertion.email"
   }
 

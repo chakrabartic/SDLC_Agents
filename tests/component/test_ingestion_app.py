@@ -9,6 +9,7 @@ from pm_agent.agents.offline import ExtractiveModelProvider
 from pm_agent.connectors.base import ConnectorError, PollResult, make_signal
 from pm_agent.grounding import LocalRedactor
 from pm_agent.ingestion_app import build_ingestion_app
+from pm_agent.placeholders import not_implemented
 from pm_agent.runtime import build_local_services
 from pm_agent.schemas import ClaimKind, RecordType, SourceSystem, VerificationOutcome
 from tests.component.helpers import AppSession
@@ -28,13 +29,16 @@ ADO_BODY = ("Feature request: bulk export of depth logs to the rig WITSML store.
 
 
 class FakeConnector:
-    def __init__(self, source: SourceSystem, signals: list, fail: bool = False) -> None:  # type: ignore[type-arg]
-        self.source, self.signals, self.fail = source, signals, fail
+    def __init__(self, source: SourceSystem, signals: list, fail: bool = False,  # type: ignore[type-arg]
+                 unconfigured: bool = False) -> None:
+        self.source, self.signals, self.fail, self.unconfigured = source, signals, fail, unconfigured
 
     def poll(self, cursor: str | None, limit: int = 100) -> PollResult:
         del limit
         if self.fail:
             raise ConnectorError("unavailable", "sandbox down")
+        if self.unconfigured:
+            not_implemented("Q-13", "mailboxes in scope")
         return PollResult(source=self.source, signals=self.signals if cursor is None else [], next_cursor="c1")
 
     def get(self, record_id: str):  # type: ignore[no-untyped-def]
@@ -91,3 +95,13 @@ async def test_reingestion_is_idempotent() -> None:
     second = await AppSession(app).send("ingest")
     assert second.output_of("emit_events")["stored"] == 0
     assert len(services.problems.list_problems()) == 2
+
+
+async def test_sources_awaiting_slb_details_are_reported_not_fatal() -> None:
+    settings = local_settings()
+    connectors = _connectors(settings)
+    connectors[SourceSystem.ONEDRIVE] = FakeConnector(SourceSystem.ONEDRIVE, [], unconfigured=True)
+    services = build_local_services(settings, connectors=connectors)
+    turn = await AppSession(build_ingestion_app(services, ExtractiveModelProvider())).send("ingest")
+    summary = turn.output_of("emit_events")
+    assert summary["source_health"]["onedrive"] == "not_configured" and summary["stored"] == 4

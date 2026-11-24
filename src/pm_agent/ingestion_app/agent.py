@@ -17,6 +17,7 @@ from pm_agent.agents.factory import LlmNodes, ModelProvider
 from pm_agent.connectors.base import ConnectorError, ConnectorStatus, SourceConnector
 from pm_agent.grounding.chunking import chunk_signal
 from pm_agent.grounding.dedup import jaccard_minhash
+from pm_agent.placeholders import PlaceholderNotImplemented
 from pm_agent.runtime import Services
 from pm_agent.schemas import Signal, SourceSystem
 from pm_agent.settings import ConfigurationError
@@ -33,6 +34,9 @@ def _poller(source: SourceSystem, connector: SourceConnector) -> Any:
         except ConnectorError as exc:
             return {"source": source.value, "status": exc.code, "reason": str(exc), "signals": [],
                     "next_cursor": cursor}
+        except PlaceholderNotImplemented as exc:  # the source's SLB integration details are not supplied yet
+            return {"source": source.value, "status": "not_configured", "reason": f"awaiting {exc.question_id}",
+                    "signals": [], "next_cursor": cursor}
         return {"source": source.value, "status": result.status.value, "reason": result.reason,
                 "signals": [s.model_dump(mode="json") for s in result.signals], "next_cursor": result.next_cursor}
 

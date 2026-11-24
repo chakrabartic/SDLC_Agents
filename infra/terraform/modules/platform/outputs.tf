@@ -79,7 +79,7 @@ output "kms" {
   value = {
     PM_AGENT_APPROVAL_KEY = module.kms.approval_token_signer_version
     PM_AGENT_VERIFIER_KEY = module.kms.verifier_report_signer_version
-    sdp_wrap_key          = module.kms.sdp_wrap_key_id
+    PM_AGENT_SDP_KMS_KEY  = module.kms.sdp_wrap_key_id
   }
 }
 
@@ -111,9 +111,25 @@ output "k8s_overlay_values" {
     correlation_ilb_address_name  = module.network.correlation_ilb_address_name
     correlation_mcp_hostname      = module.network.correlation_mcp_hostname
     image_repository              = module.ci.artifact_registry_repository
+    webhook_secret_env            = { for sid, w in local.webhook_secrets : w.env => sid } # ExternalSecret data map
   }
 }
 
 output "ci_service_account_email" {
   value = module.ci.ci_service_account_email
+}
+
+output "secret_accessors" {
+  description = "Secret Manager secret -> workloads allowed to read it (owning workload only)."
+  value       = local.secrets
+}
+
+output "service_env_contract" {
+  description = "Per Cloud Run service: env var NAMES (plain) and env vars projected from Secret Manager — values omitted."
+  value = {
+    for s in keys(local.run_services) : s => {
+      env        = sort(keys(local.service_env[s]))
+      secret_env = sort(keys(lookup(local.secret_env_bindings, s, {})))
+    }
+  }
 }
