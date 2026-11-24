@@ -1,0 +1,13 @@
+# S5 golden scenario (docs/13 §2) — stub until sanitized fixtures are approved (Q-11).
+id: S5
+title: "Well-level contextualization"
+status: placeholder
+fixture: "PLACEHOLDER:Q-11:s5_fixture"
+signals:
+  - "emails"
+  - "requirement document"
+  - "decks"
+expected:
+  - "requirement + advisory feasibility citing architecture constraints"
+  - "near-duplicate check"
+gates: [E3]

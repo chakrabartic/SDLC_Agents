@@ -1,0 +1,98 @@
+{
+  "_meta": {
+    "synthetic": true,
+    "mailbox": "pm-intake@pm.example.com",
+    "folder": "inbox",
+    "shape": "delta = GET /users/{mailbox}/mailFolders/{folder}/messages/delta (final page, @odata.deltaLink); uniqueBody = reply text without the quoted thread"
+  },
+  "delta": {
+    "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#Collection(message)",
+    "value": [
+      {
+        "@odata.etag": "W/\"CQAAABYAAADEMO-P1-MSG-001-v1\"",
+        "id": "AAMkADEMO-P1-MSG-001",
+        "changeKey": "CQAAABYAAADEMO-P1-MSG-001-v1",
+        "createdDateTime": "2026-05-09T09:40:00Z",
+        "receivedDateTime": "2026-05-09T09:40:00Z",
+        "sentDateTime": "2026-05-09T09:39:30Z",
+        "subject": "TVDHD missing in standardized log (CNE)",
+        "bodyPreview": "Hi team, since the morning run the TVDHD channel is missing from the standardized log",
+        "body": {
+          "contentType": "html",
+          "content": "<html><body><p>Hi team,</p><p>Since the morning run the TVDHD channel is missing from the standardized log TIME_SURFACE for WELL-0042(h). Our drilling engineers rely on it for the real-time dashboard. Can you advise?</p><p>Regards,<br>Drilling Lead, Contoso Energy<br>+1 555 010 4477 | drilling.lead@contoso-energy.example.com</p></body></html>"
+        },
+        "conversationId": "AAQkADEMO-P1-THREAD",
+        "internetMessageId": "<p1-msg-001@contoso-energy.example.com>",
+        "from": {"emailAddress": {"name": "Drilling Lead (synthetic)", "address": "drilling.lead@contoso-energy.example.com"}},
+        "toRecipients": [{"emailAddress": {"name": "PM Intake", "address": "pm-intake@pm.example.com"}}],
+        "webLink": "https://outlook.office365.com/owa/?ItemID=AAMkADEMO-P1-MSG-001&exvsurl=1&viewmodel=ReadMessageItem",
+        "parentFolderId": "AAMkADEMO-INBOX"
+      },
+      {
+        "@odata.etag": "W/\"CQAAABYAAADEMO-P1-MSG-002-v1\"",
+        "id": "AAMkADEMO-P1-MSG-002",
+        "changeKey": "CQAAABYAAADEMO-P1-MSG-002-v1",
+        "createdDateTime": "2026-05-09T13:20:00Z",
+        "receivedDateTime": "2026-05-09T13:20:00Z",
+        "sentDateTime": "2026-05-09T13:19:40Z",
+        "subject": "RE: TVDHD missing in standardized log (CNE)",
+        "bodyPreview": "Hello, we traced it to the standardization mapping file",
+        "body": {
+          "contentType": "html",
+          "content": "<html><body><p>Hello,</p><p>We traced it to the standardization mapping file being uploaded after the channel started streaming (case CS9000123). Uploading the mapping file again fixed it; engineering is tracking a permanent fix in Bug 9100123.</p><p>Best regards,<br>L2 Support</p><hr><p>From: drilling.lead@contoso-energy.example.com<br>Since the morning run the TVDHD channel is missing from the standardized log TIME_SURFACE for WELL-0042(h).</p></body></html>"
+        },
+        "uniqueBody": {
+          "contentType": "html",
+          "content": "<html><body><p>Hello,</p><p>We traced it to the standardization mapping file being uploaded after the channel started streaming (case CS9000123). Uploading the mapping file again fixed it; engineering is tracking a permanent fix in Bug 9100123.</p><p>Best regards,<br>L2 Support</p></body></html>"
+        },
+        "conversationId": "AAQkADEMO-P1-THREAD",
+        "internetMessageId": "<p1-msg-002@eng.example.com>",
+        "from": {"emailAddress": {"name": "L2 Support (synthetic)", "address": "l2.support@eng.example.com"}},
+        "toRecipients": [{"emailAddress": {"name": "Drilling Lead (synthetic)", "address": "drilling.lead@contoso-energy.example.com"}}],
+        "webLink": "https://outlook.office365.com/owa/?ItemID=AAMkADEMO-P1-MSG-002&exvsurl=1&viewmodel=ReadMessageItem",
+        "parentFolderId": "AAMkADEMO-INBOX"
+      },
+      {
+        "@odata.etag": "W/\"CQAAABYAAADEMO-P2-MSG-001-v1\"",
+        "id": "AAMkADEMO-P2-MSG-001",
+        "changeKey": "CQAAABYAAADEMO-P2-MSG-001-v1",
+        "createdDateTime": "2026-05-12T08:10:00Z",
+        "receivedDateTime": "2026-05-12T08:10:00Z",
+        "sentDateTime": "2026-05-12T08:09:45Z",
+        "subject": "Request: bulk export of depth logs to the rig WITSML store",
+        "bodyPreview": "Our rig teams spend hours exporting depth logs one at a time",
+        "body": {
+          "contentType": "html",
+          "content": "<html><body><p>Hello,</p><p>Our rig teams spend hours exporting depth logs one at a time to the rig WITSML store. Could you support a bulk export of all depth logs for a well in one step? This affects every Fabrikam Petroleum rig on the new campaign.</p><p>Thanks,<br>Data Manager, FPC<br>Mobile: +44 20 7946 0958</p></body></html>"
+        },
+        "conversationId": "AAQkADEMO-P2-FPC",
+        "internetMessageId": "<p2-msg-001@fabrikam-petroleum.example.com>",
+        "from": {"emailAddress": {"name": "Data Manager (synthetic)", "address": "data.manager@fabrikam-petroleum.example.com"}},
+        "toRecipients": [{"emailAddress": {"name": "PM Intake", "address": "pm-intake@pm.example.com"}}],
+        "webLink": "https://outlook.office365.com/owa/?ItemID=AAMkADEMO-P2-MSG-001&exvsurl=1&viewmodel=ReadMessageItem",
+        "parentFolderId": "AAMkADEMO-INBOX"
+      },
+      {
+        "@odata.etag": "W/\"CQAAABYAAADEMO-P2-MSG-002-v1\"",
+        "id": "AAMkADEMO-P2-MSG-002",
+        "changeKey": "CQAAABYAAADEMO-P2-MSG-002-v1",
+        "createdDateTime": "2026-05-13T15:30:00Z",
+        "receivedDateTime": "2026-05-13T15:30:00Z",
+        "sentDateTime": "2026-05-13T15:29:50Z",
+        "subject": "Export all depth logs to the on-rig WITSML server",
+        "bodyPreview": "For WELL-0107 we need to push every depth-indexed log",
+        "body": {
+          "contentType": "html",
+          "content": "<html><body><p>Hi,</p><p>For WELL-0107 we need to push every depth-indexed log to the on-rig WITSML server in one go instead of log by log. Is a bulk export on the roadmap? Northwind Offshore would pilot it.</p><p>Regards,<br>Operations Geologist, NWO</p></body></html>"
+        },
+        "conversationId": "AAQkADEMO-P2-NWO",
+        "internetMessageId": "<p2-msg-002@northwind-offshore.example.com>",
+        "from": {"emailAddress": {"name": "Operations Geologist (synthetic)", "address": "ops.geologist@northwind-offshore.example.com"}},
+        "toRecipients": [{"emailAddress": {"name": "PM Intake", "address": "pm-intake@pm.example.com"}}],
+        "webLink": "https://outlook.office365.com/owa/?ItemID=AAMkADEMO-P2-MSG-002&exvsurl=1&viewmodel=ReadMessageItem",
+        "parentFolderId": "AAMkADEMO-INBOX"
+      }
+    ],
+    "@odata.deltaLink": "https://graph.microsoft.com/v1.0/users/pm-intake@pm.example.com/mailFolders/inbox/messages/delta?$deltatoken=golden-mail"
+  }
+}

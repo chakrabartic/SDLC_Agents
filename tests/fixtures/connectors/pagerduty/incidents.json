@@ -1,0 +1,142 @@
+{
+  "_meta": {
+    "synthetic": true,
+    "api_base": "https://api.pagerduty.com",
+    "web_base": "https://example.pagerduty.com",
+    "shape": "incidents = GET /incidents (REST v2); notes.<id> = GET /incidents/{id}/notes; log_entries.<id> = GET /incidents/{id}/log_entries",
+    "delivery_note": "incidents[2] re-delivers incidents[0] at the same version (overlapping 'since' windows) - the golden exact duplicate"
+  },
+  "incidents": {
+    "incidents": [
+      {
+        "id": "Q1GOLDENP1PD01",
+        "type": "incident",
+        "incident_number": 90000123,
+        "title": "Standardized log channel TVDHD not populated for WELL-0042(h)",
+        "summary": "[#90000123] Standardized log channel TVDHD not populated for WELL-0042(h)",
+        "description": "Standardized log channel TVDHD not populated for WELL-0042(h)",
+        "status": "resolved",
+        "urgency": "high",
+        "created_at": "2026-05-09T10:02:00Z",
+        "updated_at": "2026-05-09T12:40:00Z",
+        "last_status_change_at": "2026-05-09T12:40:00Z",
+        "html_url": "https://example.pagerduty.com/incidents/Q1GOLDENP1PD01",
+        "self": "https://api.pagerduty.com/incidents/Q1GOLDENP1PD01",
+        "service": {"id": "PSVC0LOGSTD", "type": "service_reference", "summary": "Log Standardization (synthetic)"},
+        "assignments": [{"assignee": {"id": "PUSR0L2SUP", "type": "user_reference", "summary": "L2 Support On-call (synthetic)"}}],
+        "body": {
+          "type": "incident_body",
+          "details": "For well WELL-0042(h), the channel TVDHD from source log TIME_RT_WITSML was not being populated into the standardized log TIME_SURFACE. Root cause: the standardization mapping file was uploaded after the channel streamed. Customer: CNE. Impact: the real-time drilling dashboard showed an empty TVDHD curve for the morning run and the customer could not monitor true vertical depth. Mitigation: the mapping file was uploaded again and the channel was backfilled; no data was lost."
+        }
+      },
+      {
+        "id": "Q1NOISEPD00002",
+        "type": "incident",
+        "incident_number": 90000124,
+        "title": "Disk usage above 85% on the log archive node",
+        "summary": "[#90000124] Disk usage above 85% on the log archive node",
+        "description": "Disk usage above 85% on the log archive node",
+        "status": "resolved",
+        "urgency": "low",
+        "created_at": "2026-05-09T14:00:00Z",
+        "updated_at": "2026-05-09T14:35:00Z",
+        "last_status_change_at": "2026-05-09T14:35:00Z",
+        "html_url": "https://example.pagerduty.com/incidents/Q1NOISEPD00002",
+        "self": "https://api.pagerduty.com/incidents/Q1NOISEPD00002",
+        "service": {"id": "PSVC0ARCHIV", "type": "service_reference", "summary": "Log Archive (synthetic)"},
+        "assignments": [],
+        "body": {
+          "type": "incident_body",
+          "details": "Archive node disk usage crossed the 85% threshold; older partitions were compressed. No customer impact."
+        }
+      },
+      {
+        "id": "Q1GOLDENP1PD01",
+        "type": "incident",
+        "incident_number": 90000123,
+        "title": "Standardized log channel TVDHD not populated for WELL-0042(h)",
+        "summary": "[#90000123] Standardized log channel TVDHD not populated for WELL-0042(h)",
+        "description": "Standardized log channel TVDHD not populated for WELL-0042(h)",
+        "status": "resolved",
+        "urgency": "high",
+        "created_at": "2026-05-09T10:02:00Z",
+        "updated_at": "2026-05-09T12:40:00Z",
+        "last_status_change_at": "2026-05-09T12:40:00Z",
+        "html_url": "https://example.pagerduty.com/incidents/Q1GOLDENP1PD01",
+        "self": "https://api.pagerduty.com/incidents/Q1GOLDENP1PD01",
+        "service": {"id": "PSVC0LOGSTD", "type": "service_reference", "summary": "Log Standardization (synthetic)"},
+        "assignments": [{"assignee": {"id": "PUSR0L2SUP", "type": "user_reference", "summary": "L2 Support On-call (synthetic)"}}],
+        "body": {
+          "type": "incident_body",
+          "details": "For well WELL-0042(h), the channel TVDHD from source log TIME_RT_WITSML was not being populated into the standardized log TIME_SURFACE. Root cause: the standardization mapping file was uploaded after the channel streamed. Customer: CNE. Impact: the real-time drilling dashboard showed an empty TVDHD curve for the morning run and the customer could not monitor true vertical depth. Mitigation: the mapping file was uploaded again and the channel was backfilled; no data was lost."
+        }
+      }
+    ],
+    "limit": 100,
+    "offset": 0,
+    "more": false,
+    "total": null
+  },
+  "notes": {
+    "Q1GOLDENP1PD01": {
+      "notes": [
+        {
+          "id": "PNOTE0P1A",
+          "user": {"id": "PUSR0L2SUP", "type": "user_reference", "summary": "L2 Support On-call (synthetic)"},
+          "channel": {"summary": "The PagerDuty website or APIs"},
+          "content": "Uploaded the standardization mapping file again and backfilled TVDHD for WELL-0042(h); the channel is populating again. Connection string used for the backfill: Server=witsml.example.invalid;Database=rt;User Id=svc_ingest;Password=hunter2; Escalation contact: oncall.lead@ops.example.com",
+          "created_at": "2026-05-09T12:30:00Z"
+        }
+      ]
+    },
+    "Q1NOISEPD00002": {"notes": []}
+  },
+  "log_entries": {
+    "Q1GOLDENP1PD01": {
+      "log_entries": [
+        {
+          "id": "PLOG0P1TRIG",
+          "type": "trigger_log_entry",
+          "summary": "Triggered through the API.",
+          "created_at": "2026-05-09T10:02:00Z",
+          "agent": {"id": "PSVC0LOGSTD", "type": "service_reference", "summary": "Log Standardization (synthetic)"},
+          "channel": {"type": "api"}
+        },
+        {
+          "id": "PLOG0P1ACK",
+          "type": "acknowledge_log_entry",
+          "summary": "Acknowledged by L2 Support On-call.",
+          "created_at": "2026-05-09T10:09:00Z",
+          "agent": {"id": "PUSR0L2SUP", "type": "user_reference", "summary": "L2 Support On-call (synthetic)"},
+          "channel": {"type": "web_ui"}
+        },
+        {
+          "id": "PLOG0P1RES",
+          "type": "resolve_log_entry",
+          "summary": "Resolved after the mapping file was uploaded again.",
+          "created_at": "2026-05-09T12:40:00Z",
+          "agent": {"id": "PUSR0L2SUP", "type": "user_reference", "summary": "L2 Support On-call (synthetic)"},
+          "channel": {"type": "web_ui"}
+        }
+      ],
+      "limit": 100,
+      "offset": 0,
+      "more": false
+    },
+    "Q1NOISEPD00002": {
+      "log_entries": [
+        {
+          "id": "PLOG0NZTRIG",
+          "type": "trigger_log_entry",
+          "summary": "Triggered by the disk usage monitor.",
+          "created_at": "2026-05-09T14:00:00Z",
+          "agent": {"id": "PSVC0ARCHIV", "type": "service_reference", "summary": "Log Archive (synthetic)"},
+          "channel": {"type": "api"}
+        }
+      ],
+      "limit": 100,
+      "offset": 0,
+      "more": false
+    }
+  }
+}

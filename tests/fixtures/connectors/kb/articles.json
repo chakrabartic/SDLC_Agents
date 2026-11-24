@@ -1,0 +1,30 @@
+{
+  "_meta": {
+    "synthetic": true,
+    "backend": "fixture",
+    "base_url": "https://kb.example.invalid",
+    "shape": "Backend-agnostic KbArticle records (docs/09 section 7); the real backend is Q-01"
+  },
+  "articles": [
+    {
+      "id": "KB0001001",
+      "version": "3",
+      "title": "Standardized log channel is empty after mapping changes",
+      "body": "Symptom: a channel streams into the source log but stays empty in the standardized log.\n\nCause: the standardization mapping file was changed or uploaded after the channel started streaming.\n\nResolution: upload the mapping file again and run a backfill for the affected channel.",
+      "url": "https://kb.example.invalid/articles/KB0001001",
+      "labels": ["standardization", "known-issue"],
+      "state": "published",
+      "updated_utc": "2026-03-02T10:00:00Z"
+    },
+    {
+      "id": "KB0001002",
+      "version": "1",
+      "title": "Exporting a single depth log to a WITSML store",
+      "body": "Open the log, choose Export, select the target WITSML store and confirm. Each depth log is exported separately; there is no bulk export today.",
+      "url": "https://kb.example.invalid/articles/KB0001002",
+      "labels": ["witsml", "how-to"],
+      "state": "published",
+      "updated_utc": "2026-02-11T15:00:00Z"
+    }
+  ]
+}

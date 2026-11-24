@@ -1,0 +1,162 @@
+{
+  "tools": [
+    {
+      "name": "propose",
+      "description": "Record a ProposedAction (requires a PASS VerificationReport)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": true
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "query",
+      "description": "Ledger query",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": true
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "get_action",
+      "description": "Fetch a ProposedAction + payload by action_id",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": true
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "decide",
+      "description": "PM decision (called by the Workbench BFF with the IAP JWT, never by agents)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": true
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "consume_token",
+      "description": "Atomically consume the approval token (single use)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": true
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "record",
+      "description": "Append COMMIT_SUCCEEDED / COMMIT_FAILED entries",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": true
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "release_validation_package",
+      "description": "PROTOTYPE_RELEASE_INTERNAL: release an approved validation package (token-gated)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "approval_token": {
+            "type": "string",
+            "description": "KMS-signed single-use JWS (docs/07 \u00a76)"
+          },
+          "action_id": {
+            "type": "string"
+          },
+          "payload": {
+            "type": "object"
+          },
+          "validate_only": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": true,
+        "required": [
+          "approval_token",
+          "action_id",
+          "payload"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "record_trace_links",
+      "description": "ROADMAP_TRACE_LINK: record approved traceability links (token-gated)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "approval_token": {
+            "type": "string",
+            "description": "KMS-signed single-use JWS (docs/07 \u00a76)"
+          },
+          "action_id": {
+            "type": "string"
+          },
+          "payload": {
+            "type": "object"
+          },
+          "validate_only": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": true,
+        "required": [
+          "approval_token",
+          "action_id",
+          "payload"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    }
+  ]
+}

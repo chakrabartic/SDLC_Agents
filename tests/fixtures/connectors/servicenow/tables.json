@@ -1,0 +1,70 @@
+{
+  "_meta": {
+    "synthetic": true,
+    "instance_url": "https://example.service-now.com",
+    "shape": "tables.<table> = GET /api/now/table/<table>?sysparm_display_value=all (each field is {display_value, value}); sys_journal_field = GET /api/now/table/sys_journal_field (plain values)"
+  },
+  "tables": {
+    "incident": {
+      "result": [
+        {
+          "sys_id": {"display_value": "6f1c2b3a4d5e6f708192a3b4c5d6e7f8", "value": "6f1c2b3a4d5e6f708192a3b4c5d6e7f8"},
+          "number": {"display_value": "INC9000456", "value": "INC9000456"},
+          "sys_class_name": {"display_value": "Incident", "value": "incident"},
+          "short_description": {"display_value": "[PagerDuty] Standardized log channel TVDHD not populated for WELL-0042(h)", "value": "[PagerDuty] Standardized log channel TVDHD not populated for WELL-0042(h)"},
+          "description": {"display_value": "Mirrored from PagerDuty: For well WELL-0042(h), the channel TVDHD from source log TIME_RT_WITSML was not being populated into the standardized log TIME_SURFACE. Root cause: the standardization mapping file was uploaded after the channel streamed. Customer: CNE. Impact: the real-time drilling dashboard displayed an empty TVDHD curve for the morning run and the customer could not monitor true vertical depth. Mitigation: the mapping file was uploaded again and the channel was backfilled; no data was lost.", "value": "Mirrored from PagerDuty: For well WELL-0042(h), the channel TVDHD from source log TIME_RT_WITSML was not being populated into the standardized log TIME_SURFACE. Root cause: the standardization mapping file was uploaded after the channel streamed. Customer: CNE. Impact: the real-time drilling dashboard displayed an empty TVDHD curve for the morning run and the customer could not monitor true vertical depth. Mitigation: the mapping file was uploaded again and the channel was backfilled; no data was lost."},
+          "close_notes": {"display_value": "", "value": ""},
+          "company": {"display_value": "Contoso Energy", "value": "c0c0c0c0c0c0c0c0c0c0c0c0c0c0c001"},
+          "opened_by": {"display_value": "PagerDuty Integration (synthetic)", "value": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a101"},
+          "state": {"display_value": "Resolved", "value": "6"},
+          "priority": {"display_value": "2 - High", "value": "2"},
+          "sys_mod_count": {"display_value": "4", "value": "4"},
+          "sys_created_on": {"display_value": "05/09/2026 10:05:00", "value": "2026-05-09 10:05:00"},
+          "sys_updated_on": {"display_value": "05/09/2026 12:45:00", "value": "2026-05-09 12:45:00"}
+        }
+      ]
+    },
+    "sn_customerservice_case": {
+      "result": [
+        {
+          "sys_id": {"display_value": "0a1b2c3d4e5f60718293a4b5c6d7e8f9", "value": "0a1b2c3d4e5f60718293a4b5c6d7e8f9"},
+          "number": {"display_value": "CS9000123", "value": "CS9000123"},
+          "sys_class_name": {"display_value": "Case", "value": "sn_customerservice_case"},
+          "short_description": {"display_value": "TVDHD curve missing from the standardized log for WELL-0042(h)", "value": "TVDHD curve missing from the standardized log for WELL-0042(h)"},
+          "description": {"display_value": "Customer reports the TVDHD curve has been empty in the TIME_SURFACE standardized log for WELL-0042(h) since the morning run. Their drilling engineers rely on it in the DrillOps real-time dashboard. Customer contact: drilling.lead@contoso-energy.example.com, phone +1 555 010 4477, weekdays only", "value": "Customer reports the TVDHD curve has been empty in the TIME_SURFACE standardized log for WELL-0042(h) since the morning run. Their drilling engineers rely on it in the DrillOps real-time dashboard. Customer contact: drilling.lead@contoso-energy.example.com, phone +1 555 010 4477, weekdays only"},
+          "close_notes": {"display_value": "", "value": ""},
+          "account": {"display_value": "Contoso Energy", "value": "c0c0c0c0c0c0c0c0c0c0c0c0c0c0c001"},
+          "contact": {"display_value": "Drilling Lead (synthetic)", "value": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b202"},
+          "opened_by": {"display_value": "L2 Support (synthetic)", "value": "b3b3b3b3b3b3b3b3b3b3b3b3b3b3b303"},
+          "state": {"display_value": "Awaiting Info", "value": "18"},
+          "priority": {"display_value": "2 - High", "value": "2"},
+          "sys_mod_count": {"display_value": "6", "value": "6"},
+          "sys_created_on": {"display_value": "05/09/2026 10:55:00", "value": "2026-05-09 10:55:00"},
+          "sys_updated_on": {"display_value": "05/10/2026 09:00:00", "value": "2026-05-10 09:00:00"}
+        }
+      ]
+    }
+  },
+  "sys_journal_field": {
+    "result": [
+      {
+        "sys_id": "1b2c3d4e5f6071829304a5b6c7d8e9f0",
+        "element_id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+        "element": "work_notes",
+        "name": "sn_customerservice_case",
+        "value": "Associated PD #90000123. Engineering bug: https://dev.azure.com/example-org/ExampleProject/_workitems/edit/9100123 . The mapping file was uploaded after the channel started streaming; the permanent fix is tracked in the bug.",
+        "sys_created_on": "2026-05-09 11:05:00",
+        "sys_created_by": "l2.support"
+      },
+      {
+        "sys_id": "2c3d4e5f60718293a4b5c6d7e8f90a1b",
+        "element_id": "0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+        "element": "comments",
+        "name": "sn_customerservice_case",
+        "value": "We uploaded the mapping file again and backfilled TVDHD for WELL-0042(h). Please confirm the curve is now visible in your dashboard.",
+        "sys_created_on": "2026-05-09 13:10:00",
+        "sys_created_by": "l2.support"
+      }
+    ]
+  }
+}

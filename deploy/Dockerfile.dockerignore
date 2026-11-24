@@ -1,0 +1,14 @@
+# Allow-list build context for deploy/Dockerfile (BuildKit reads <Dockerfile>.dockerignore next to the Dockerfile).
+# Everything is excluded unless re-included below — in particular shared_files/ (SLB confidential corpus),
+# .venv/, .git/, .research_cache/, tests/, docs/ and any secrets.
+**
+!pyproject.toml
+!README.md
+!src/
+!src/**
+!config/
+!config/pm_agent.yaml
+!config/dls_catalog.sample.json
+**/__pycache__
+**/*.py[cod]
+**/.DS_Store

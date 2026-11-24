@@ -1,0 +1,225 @@
+# correlation-engine (MCP server "mcp-correlation"): in-memory ANN candidate index + scoring (Deployment, 2 replicas,
+# memory-heavy) and nightly HDBSCAN re-clustering (CronJob). Reached ONLY through Agent Gateway egress via the
+# VPC (PSC interface) at https://mcp-correlation.<private domain>/mcp — internal Application LB (GKE Gateway
+# gke-l7-rilb) terminating TLS with a Certificate Manager certificate issued by a private CA.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: correlation-engine
+  labels:
+    app.kubernetes.io/name: correlation-engine
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: correlation-engine
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: correlation-engine
+    spec:
+      serviceAccountName: correlation-engine
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: correlation-engine
+      containers:
+        - name: app
+          image: pm-agent/mcp-correlation
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: pm-agent-env
+          env:
+            - name: PM_AGENT_COMPONENT
+              value: mcp-correlation
+            - name: PORT
+              value: "8080"
+            - name: PM_AGENT_SUBSCRIPTION
+              value: signal-ingested-correlation
+          resources:
+            requests:
+              cpu: "2"
+              memory: 8Gi
+            limits:
+              memory: 8Gi
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            failureThreshold: 60 # index warm-up
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 30
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: correlation-engine
+  labels:
+    app.kubernetes.io/name: correlation-engine
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: correlation-engine
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: mcp-correlation
+spec:
+  gatewayClassName: gke-l7-rilb
+  addresses:
+    - type: NamedAddress
+      value: SET_BY_OVERLAY # Terraform output correlation_ilb_address_name
+  listeners:
+    - name: https
+      protocol: HTTPS
+      port: 443
+      tls:
+        mode: Terminate
+        options:
+          networking.gke.io/cert-manager-certs: mcp-correlation-internal # private-CA cert (see deploy/k8s/README.md)
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: mcp-correlation
+spec:
+  parentRefs:
+    - name: mcp-correlation
+  hostnames:
+    - mcp-correlation.pm-agent.internal
+  rules:
+    - backendRefs:
+        - name: correlation-engine
+          port: 8080
+---
+apiVersion: networking.gke.io/v1
+kind: HealthCheckPolicy
+metadata:
+  name: correlation-engine
+spec:
+  default:
+    config:
+      type: HTTP
+      httpHealthCheck:
+        port: 8080
+        requestPath: /healthz
+  targetRef:
+    group: ""
+    kind: Service
+    name: correlation-engine
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: correlation-engine
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: correlation-engine
+---
+# Nightly re-clustering (docs/03 §2, docs/06 §6). Same image; the dispatcher runs the batch job mode.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: correlation-recluster
+  labels:
+    app.kubernetes.io/name: correlation-recluster
+spec:
+  schedule: "0 2 * * *"
+  timeZone: "Etc/UTC"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 3600
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 14400
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: correlation-recluster
+        spec:
+          serviceAccountName: correlation-engine
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            fsGroup: 10001
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: recluster
+              image: pm-agent/mcp-correlation
+              envFrom:
+                - configMapRef:
+                    name: pm-agent-env
+              env:
+                - name: PM_AGENT_COMPONENT
+                  value: mcp-correlation
+                - name: PM_AGENT_JOB
+                  value: recluster # dispatcher job mode (to be confirmed with pm_agent.serve)
+              resources:
+                requests:
+                  cpu: "4"
+                  memory: 16Gi
+                limits:
+                  memory: 16Gi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir: {}

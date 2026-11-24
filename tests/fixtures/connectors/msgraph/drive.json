@@ -1,0 +1,56 @@
+{
+  "_meta": {
+    "synthetic": true,
+    "drive_id": "b!DEMOdrive0001",
+    "site_url": "https://example.sharepoint.com/sites/pm",
+    "shape": "delta = GET /drives/{drive}/root/delta (final page); item_text = text extracted server-side from GET /drives/{d}/items/{i}/content; workbooks.<item>.<sheet> = GET .../workbook/worksheets/{sheet}/usedRange(valuesOnly=true)"
+  },
+  "delta": {
+    "@odata.context": "https://graph.microsoft.com/v1.0/$metadata#Collection(driveItem)",
+    "value": [
+      {
+        "id": "01DEMOTRACKER0001",
+        "name": "PM Issue Tracker.xlsx",
+        "eTag": "\"{DEMO-TRACKER-0001},12\"",
+        "cTag": "\"c:{DEMO-TRACKER-0001},12\"",
+        "createdDateTime": "2026-04-01T08:00:00Z",
+        "lastModifiedDateTime": "2026-05-14T17:00:00Z",
+        "size": 18432,
+        "webUrl": "https://example.sharepoint.com/sites/pm/Shared%20Documents/Trackers/PM%20Issue%20Tracker.xlsx",
+        "file": {"mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
+        "parentReference": {"driveId": "b!DEMOdrive0001", "id": "01DEMOFOLDER0001", "path": "/drive/root:/Trackers"},
+        "lastModifiedBy": {"user": {"displayName": "Product Manager (synthetic)", "email": "pm.owner@pm.example.com"}},
+        "sensitivityLabel": {"displayName": "Internal"}
+      },
+      {
+        "id": "01DEMODOC0002",
+        "name": "P2 discovery notes.docx",
+        "eTag": "\"{DEMO-DOC-0002},3\"",
+        "cTag": "\"c:{DEMO-DOC-0002},3\"",
+        "createdDateTime": "2026-05-13T09:00:00Z",
+        "lastModifiedDateTime": "2026-05-13T18:30:00Z",
+        "size": 24576,
+        "webUrl": "https://example.sharepoint.com/sites/pm/Shared%20Documents/Discovery/P2%20discovery%20notes.docx",
+        "file": {"mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
+        "parentReference": {"driveId": "b!DEMOdrive0001", "id": "01DEMOFOLDER0002", "path": "/drive/root:/Discovery"},
+        "lastModifiedBy": {"user": {"displayName": "Product Manager (synthetic)", "email": "pm.owner@pm.example.com"}}
+      }
+    ],
+    "@odata.deltaLink": "https://graph.microsoft.com/v1.0/drives/b!DEMOdrive0001/root/delta?token=golden-drive"
+  },
+  "item_text": {
+    "01DEMODOC0002": "Discovery notes: bulk export of depth logs to the rig WITSML store (Lumi for Drilling).\n\nInterviewed the Fabrikam Petroleum and Northwind Offshore data managers. Both teams export depth logs log by log today and lose several hours per well.\n\nOpen questions: the maximum number of logs per well; what happens when the rig store rejects one log; whether time-indexed logs are in scope."
+  },
+  "workbooks": {
+    "01DEMOTRACKER0001": {
+      "Tracker": {
+        "address": "Tracker!A1:G3",
+        "values": [
+          ["Ref", "Customer", "Product", "Issue", "Owner", "Status", "Next step"],
+          ["P1", "CNE", "DrillOps", "TVDHD not populated in TIME_SURFACE after a late mapping-file upload (WELL-0042(h))", "pm.owner@pm.example.com", "Open", "Confirm with engineering how the fix will be verified"],
+          ["P2", "FPC, NWO", "Lumi for Drilling", "Bulk export of depth logs to the rig WITSML store", "pm.owner@pm.example.com", "Discovery", "Collect acceptance criteria from both customers"]
+        ]
+      }
+    }
+  }
+}

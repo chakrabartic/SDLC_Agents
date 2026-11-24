@@ -1,0 +1,62 @@
+# dls-catalog-sync: hourly snapshot of the SLB DLS library (components, component sets, styles, variables) via Figma
+# REST with the plan access token (secret figma-plan-access-token) into the store (docs/03 §2, docs/09).
+# An extra run is triggered by the LIBRARY_PUBLISH hint (application-level, via the event gateway).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dls-catalog-sync
+  labels:
+    app.kubernetes.io/name: dls-catalog-sync
+spec:
+  schedule: "0 * * * *"
+  timeZone: "Etc/UTC"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 900
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 3
+      activeDeadlineSeconds: 3000
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: dls-catalog-sync
+        spec:
+          serviceAccountName: dls-catalog-sync
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            fsGroup: 10001
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: sync
+              image: pm-agent/dls-catalog-sync
+              envFrom:
+                - configMapRef:
+                    name: pm-agent-env
+              env:
+                - name: PM_AGENT_COMPONENT
+                  value: dls-catalog-sync
+                - name: PM_AGENT_CREDENTIAL_SECRETS
+                  value: SET_BY_OVERLAY # projects/<project>/secrets/figma-plan-access-token
+              resources:
+                requests:
+                  cpu: 500m
+                  memory: 1Gi
+                limits:
+                  memory: 1Gi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir: {}

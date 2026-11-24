@@ -1,0 +1,29 @@
+# Base for the GKE Autopilot data plane (docs/03 §2, docs/12 §2). Overlays set project-specific values.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: pm-agent
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: pm-agent
+    includeSelectors: false
+
+resources:
+  - namespace.yaml
+  - serviceaccounts.yaml
+  - signal-event-gateway.yaml
+  - correlation-engine.yaml
+  - dls-catalog-sync.yaml
+  - ledger-anchor.yaml
+
+# Env every component reads (lead alignment). Values are overridden per env (behavior: merge in overlays).
+configMapGenerator:
+  - name: pm-agent-env
+    literals:
+      - PM_AGENT_ENV=dev
+      - GOOGLE_CLOUD_PROJECT=PROJECT_ID
+      - GOOGLE_CLOUD_LOCATION=us-central1
+      - GOOGLE_GENAI_USE_VERTEXAI=true
+      - GOOGLE_GENAI_USE_ENTERPRISE=true
+      - PM_AGENT_VERIFIER_KEY=SET_BY_OVERLAY
+      - PM_AGENT_APPROVAL_KEY=SET_BY_OVERLAY

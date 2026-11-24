@@ -1,0 +1,16 @@
+%{ for i, b in bindings ~}
+%{ if i == 0 ~}
+{ "policy": { "bindings": [ {
+%{ else ~}
+  }, {
+%{ endif ~}
+  "role": "roles/iap.egressor",
+  "members": [${join(", ", [for m in b.members : "\"${m}\""])}]${b.expression == null ? "" : ","}
+%{ if b.expression != null ~}
+  "condition": {
+    "title": "${b.title}",
+    "expression": "${replace(b.expression, "\"", "\\\"")}"
+  }
+%{ endif ~}
+%{ endfor ~}
+  } ] } }

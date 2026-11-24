@@ -1,0 +1,22 @@
+# stage overlay — thin; every PLACEHOLDER must be replaced from `terraform output k8s_overlay_values` (envs/stage).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: pm-agent
+
+resources:
+  - ../../base
+
+# images: set by CI — kustomize edit set image pm-agent/<component>=<region>-docker.pkg.dev/<project>/pm-agent/<component>:$SHORT_SHA
+
+configMapGenerator:
+  - name: pm-agent-env
+    behavior: merge
+    literals:
+      - PM_AGENT_ENV=stage
+      - GOOGLE_CLOUD_PROJECT=PLACEHOLDER:Q-10:stage_project_id
+      - GOOGLE_CLOUD_LOCATION=us-central1
+      - PM_AGENT_VERIFIER_KEY=projects/PLACEHOLDER:Q-10:stage_project_id/locations/us-central1/keyRings/pm-agent-stage/cryptoKeys/verifier-report-signer/cryptoKeyVersions/1
+      - PM_AGENT_APPROVAL_KEY=projects/PLACEHOLDER:Q-10:stage_project_id/locations/us-central1/keyRings/pm-agent-stage/cryptoKeys/approval-token-signer/cryptoKeyVersions/1
+
+patches:
+  - path: patches.yaml

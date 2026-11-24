@@ -1,0 +1,13 @@
+# S4 golden scenario (docs/13 §2) — stub until sanitized fixtures are approved (Q-11).
+id: S4
+title: "Legal tags for shared drilling data"
+status: placeholder
+fixture: "PLACEHOLDER:Q-11:s4_fixture"
+signals:
+  - "documents"
+  - "email"
+  - "meeting transcript"
+expected:
+  - "initiative draft (slb-initiative-v1)"
+  - "readiness gaps (acceptance criteria, edge cases) => questions (AC2)"
+gates: [E3]

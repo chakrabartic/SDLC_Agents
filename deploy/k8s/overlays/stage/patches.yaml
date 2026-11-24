@@ -1,0 +1,90 @@
+# Strategic-merge patches for stage (values from `terraform output k8s_overlay_values`).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: signal-event-gateway
+  annotations:
+    iam.gke.io/gcp-service-account: sa-gke-signal-event-gateway@PLACEHOLDER:Q-10:stage_project_id.iam.gserviceaccount.com
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: correlation-engine
+  annotations:
+    iam.gke.io/gcp-service-account: sa-gke-correlation-engine@PLACEHOLDER:Q-10:stage_project_id.iam.gserviceaccount.com
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dls-catalog-sync
+  annotations:
+    iam.gke.io/gcp-service-account: sa-gke-dls-catalog-sync@PLACEHOLDER:Q-10:stage_project_id.iam.gserviceaccount.com
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ledger-anchor
+  annotations:
+    iam.gke.io/gcp-service-account: sa-mcp-ledger@PLACEHOLDER:Q-10:stage_project_id.iam.gserviceaccount.com
+---
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: signal-event-gateway
+spec:
+  securityPolicy:
+    name: pm-agent-stage-event-gateway
+---
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: signal-event-gateway
+spec:
+  domains:
+    - "PLACEHOLDER:Q-10:event_gateway_hostname"
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: signal-event-gateway
+  annotations:
+    kubernetes.io/ingress.global-static-ip-name: pm-agent-stage-event-gateway
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: mcp-correlation
+spec:
+  addresses:
+    - type: NamedAddress
+      value: pm-agent-stage-correlation-ilb
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dls-catalog-sync
+spec:
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: sync
+              env:
+                - name: PM_AGENT_CREDENTIAL_SECRETS
+                  value: projects/PLACEHOLDER:Q-10:stage_project_id/secrets/figma-plan-access-token
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ledger-anchor
+spec:
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: anchor
+              env:
+                - name: PM_AGENT_LEDGER_EXPORTS_BUCKET
+                  value: pm-agent-ledger-exports-stage

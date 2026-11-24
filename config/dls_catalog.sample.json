@@ -1,0 +1,21 @@
+{
+  "_comment": "SAMPLE SLB DLS catalog snapshot (synthetic). Production snapshots are written by the dls-catalog-sync CronJob from the Figma library (GET /v1/files/{key}/components, component_sets) - Q-03 supplies the real library file key, component keys, fonts and tokens.",
+  "file_key": "PLACEHOLDER:Q-03:dls_library_file_key",
+  "published_version": "sample-2026-11-24",
+  "components": [
+    {"key": "dls:app-shell/default", "name": "App shell", "description": "Page frame with top bar and side navigation", "variants": {}},
+    {"key": "dls:button/primary", "name": "Button / Primary", "description": "Primary call to action", "variants": {"size": ["sm", "md", "lg"], "state": ["default", "disabled"]}},
+    {"key": "dls:button/secondary", "name": "Button / Secondary", "description": "Secondary action", "variants": {"size": ["sm", "md", "lg"]}},
+    {"key": "dls:card/default", "name": "Card", "description": "Content container with header and body", "variants": {"elevation": ["flat", "raised"]}},
+    {"key": "dls:table/default", "name": "Data table", "description": "Sortable table with pagination", "variants": {"density": ["compact", "comfortable"]}},
+    {"key": "dls:banner/warning", "name": "Banner / Warning", "description": "Inline warning or partial-data banner", "variants": {}},
+    {"key": "dls:badge/status", "name": "Status badge", "description": "Status pill (ok, warning, error, info)", "variants": {"tone": ["ok", "warning", "error", "info"]}},
+    {"key": "dls:text-field/default", "name": "Text field", "description": "Single-line input with label", "variants": {"state": ["default", "error", "disabled"]}},
+    {"key": "dls:select/default", "name": "Select", "description": "Dropdown selection", "variants": {}},
+    {"key": "dls:tabs/default", "name": "Tabs", "description": "Horizontal tabs", "variants": {}},
+    {"key": "dls:modal/confirm", "name": "Confirmation dialog", "description": "Modal dialog with confirm and cancel", "variants": {}},
+    {"key": "dls:chart/line", "name": "Line chart", "description": "Time-series line chart (log tracks, trends)", "variants": {}},
+    {"key": "dls:list/default", "name": "List", "description": "Vertical list with optional icons", "variants": {}},
+    {"key": "dls:progress/linear", "name": "Progress bar", "description": "Determinate or indeterminate progress", "variants": {"mode": ["determinate", "indeterminate"]}}
+  ]
+}

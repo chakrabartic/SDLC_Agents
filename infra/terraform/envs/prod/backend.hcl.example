@@ -1,0 +1,3 @@
+# Copy to backend.hcl and run: terraform init -backend-config=backend.hcl
+bucket = "PLACEHOLDER:Q-10:prod_tfstate_bucket"
+prefix = "pm-agent/prod"

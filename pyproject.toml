@@ -1,0 +1,115 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "slb-pm-agent"
+version = "0.1.0"
+description = "Reference architecture: SLB Intelligent Product Orchestration (PM Agent) on Google ADK 2.x, A2UI v1.0, Agent Runtime + Agent Gateway"
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+license = { text = "Proprietary — SLB / Google reference architecture" }
+# Pins re-verified 2026-11-24 against the installed packages — see docs/02 §4 and docs/14 §3.
+dependencies = [
+  "google-adk[a2a,mcp,gcp,agent-identity]==2.15.0",
+  "google-genai==2.34.0",          # ADK 2.15 requires >=2.34,<3 (google-genai 3.x not yet compatible)
+  "a2ui-agent-sdk==0.12.1",
+  "a2ui-adk[a2a]==0.3.0",
+  "a2ui-a2a==0.4.0",
+  "a2a-sdk==0.3.26",               # a2ui-a2a requires >=0.3.0,<0.4.0
+  "mcp>=2.3,<3",
+  "pydantic>=2.12,<3",
+  "PyYAML>=6.0",
+  "rfc8785==0.1.4",
+  "cryptography>=46",
+  "fastapi>=0.115",                # pm-workbench BFF, signal-event-gateway, MCP HTTP hosting
+  "uvicorn>=0.30",
+  "httpx>=0.27",                   # vendor REST clients (connectors)
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "pytest-asyncio>=0.24",
+  "pytest-mock>=3.14",
+  "pylint>=3.3",
+  "mypy>=1.13",
+  "types-PyYAML",
+  "jsonschema>=4.23",              # A2UI v1.0 wire-format contract tests
+]
+otel = ["google-adk[otel-gcp]==2.15.0"]
+gcp = [                            # deployed images (pip install ".[gcp]"); code paths are import-guarded locally
+  "google-cloud-pubsub>=2.25",     # signal-event-gateway hint publisher
+  "google-cloud-kms>=3.0",         # KmsSigner (verifier reports, approval tokens)
+  "google-cloud-dlp>=3.20",        # SdpRedactor (Sensitive Data Protection)
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pm_agent"]   # non-Python package data (e.g. a2ui/catalogs/*.json) is included automatically
+
+# ----------------------------------------------------------------- pytest
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q --strict-markers"
+markers = [
+  "contract: wire-format / interface contract tests (no network)",
+  "component: ADK workflow tests with fakes (no network, no LLM)",
+]
+filterwarnings = [
+  "ignore::DeprecationWarning",
+  "ignore::UserWarning",
+]
+
+# ----------------------------------------------------------------- mypy
+[tool.mypy]
+python_version = "3.13"
+strict = true
+mypy_path = "src"
+packages = ["pm_agent"]
+plugins = ["pydantic.mypy"]
+warn_unused_ignores = false
+
+[[tool.mypy.overrides]]
+module = ["a2ui.*", "rfc8785", "mcp.*", "google.adk.*", "a2a.*", "yaml", "jsonschema.*", "uvicorn.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# The ADK app modules compose third-party graph objects whose types are not exported precisely.
+module = ["pm_agent.core_app.*", "pm_agent.ingestion_app.*", "pm_agent.executor_app.*", "pm_agent.mcp_servers.*"]
+disallow_untyped_calls = false
+disallow_any_generics = false
+
+# ----------------------------------------------------------------- pylint
+[tool.pylint.main]
+py-version = "3.13"
+jobs = 0
+ignore-paths = ["^tests/fixtures/.*$"]
+extension-pkg-allow-list = ["pydantic"]
+
+[tool.pylint.messages_control]
+disable = [
+  "too-few-public-methods",
+  "too-many-arguments",
+  "too-many-positional-arguments",
+  "too-many-instance-attributes",
+  "too-many-return-statements",
+  "duplicate-code",
+  "fixme",
+  # Entities are specified in docs/10 and named after it; modules carry the narrative docstrings.
+  "missing-class-docstring",
+]
+
+[tool.pylint.design]
+# Workflow builders define their nodes as closures, which pylint counts as locals.
+max-locals = 25
+max-statements = 80
+
+[tool.pylint.basic]
+# Short, self-describing functions (< 8 lines) need no docstring; anything longer must explain itself.
+docstring-min-length = 8
+no-docstring-rgx = "^_"
+
+[tool.pylint.format]
+max-line-length = 120

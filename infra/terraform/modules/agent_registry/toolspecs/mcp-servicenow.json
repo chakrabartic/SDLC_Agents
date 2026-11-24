@@ -1,0 +1,48 @@
+{
+  "tools": [
+    {
+      "name": "list_records",
+      "description": "Table API delta read (incident, sc_request, sc_req_item)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cursor": {
+            "type": "string"
+          },
+          "page_size": {
+            "type": "integer"
+          }
+        },
+        "additionalProperties": true
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "list_journal",
+      "description": "sys_journal_field comments/work notes for a record",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "cursor": {
+            "type": "string"
+          },
+          "page_size": {
+            "type": "integer"
+          }
+        },
+        "additionalProperties": true
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    }
+  ]
+}

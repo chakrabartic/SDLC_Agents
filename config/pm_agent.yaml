@@ -1,0 +1,140 @@
+# PM Agent runtime configuration (reference architecture).
+# NFR-9 / DM-7: templates, checklist, thresholds, policies and connector bindings are data, not code.
+# Values written as "PLACEHOLDER:Q-xx:name" are SLB-specific details still to be supplied (see PLACEHOLDERS.md).
+# They are tolerated in local/dev and rejected in stage/prod.
+
+environment: local            # local | dev | stage | prod   (env override: PM_AGENT_ENV)
+config_version: "2026-11-24.1"
+
+gcp:
+  project_id: chayan-genai-bb # env override: GOOGLE_CLOUD_PROJECT (workspace default, GEMINI.md)
+  location: us-central1       # env override: GOOGLE_CLOUD_LOCATION
+  org_id: "PLACEHOLDER:Q-10:gcp_org_id"                  # Agent Identity trust domain is org-scoped
+  project_number: "PLACEHOLDER:Q-10:gcp_project_number"
+
+models:                        # ADR-008: pinned ids, no *-latest aliases on regional endpoints
+  router: gemini-3.5-flash-lite
+  drafter: gemini-3.8-flash
+  judge: gemini-3.8-flash
+  embedding: gemini-embedding-2
+  embedding_fallback: gemini-embedding-001
+  allow_non_regional_endpoints: false   # Q-09: may calls use `us`/`global` if a model is not on us-central1?
+  non_regional_location: "PLACEHOLDER:Q-09:non_regional_location"
+
+verifier:                      # docs/06
+  version: "verifier-0.1.0"
+  judge_required: true         # V5 bounded entailment judge (fail-closed)
+  dual_judge_action_types: [ADO_CREATE_WORK_ITEM, KB_PUBLISH_ARTICLE]
+  max_quote_chars: 400
+  near_duplicate_threshold: 0.88
+  report_max_age_hours: 24
+
+correlation:                   # docs/06 §6 — thresholds belong to the scorer that produced the score (tuned by E1)
+  signal_minhash_jaccard: 0.85
+  scoring: lexical             # lexical (offline/reference) | embedding (gemini-embedding on Agent Platform)
+  assign_threshold: 0.82       # embedding scorer
+  adjudicate_floor: 0.65       # embedding scorer
+  lexical_assign_threshold: 0.55
+  lexical_adjudicate_floor: 0.35
+  window_days: 90
+
+hitl:                          # docs/07
+  proposal_ttl_hours: 72
+  token_ttl_minutes: 15
+  token_issuer: "https://ledger.pm-agent.example.internal"   # replaced per env in Terraform outputs
+  token_audience: commit-executor
+  clock_skew_seconds: 30
+  approver_rules:              # action_type -> logical approver groups; min_approvals implements the two-person rule
+    ADO_CREATE_WORK_ITEM: {groups: [pm_approvers], min_approvals: 1}
+    ADO_ADD_LINKS: {groups: [pm_approvers], min_approvals: 1}
+    KB_PUBLISH_ARTICLE: {groups: [product_kb_reviewers], min_approvals: 1}
+    FIGMA_RENDER_PROTOTYPE: {groups: [pm_approvers, ux_reviewers], min_approvals: 2, require_each_group: true}
+    FIGMA_POST_COMMENT: {groups: [pm_approvers], min_approvals: 1}
+    PROTOTYPE_RELEASE_INTERNAL: {groups: [pm_approvers], min_approvals: 1}
+    OUTREACH_SEND_INTERNAL: {groups: [pm_approvers], min_approvals: 1}
+    ROADMAP_TRACE_LINK: {groups: [pm_approvers], min_approvals: 1}
+  idp_group_mapping:           # logical group -> SLB IdP group (Workforce Identity Federation claim)
+    pm_approvers: "PLACEHOLDER:Q-08:idp_group_pm_approvers"
+    ux_reviewers: "PLACEHOLDER:Q-08:idp_group_ux_reviewers"
+    product_kb_reviewers: "PLACEHOLDER:Q-08:idp_group_kb_reviewers"
+
+policies:                      # docs/06 §7 (policy-as-code)
+  prohibited_actions: [PURCHASE, PAYMENT, CREATE_ACCOUNT, ACCEPT_TERMS, EXTERNAL_COMMUNICATION]
+  outreach_allowed_domains: ["slb.com"]
+  global_kb_forbids_customer_names: true
+  min_dls_reuse_ratio: 0.90
+
+product:
+  pilot_product_line: "PLACEHOLDER:Q-12:pilot_product_line"
+  product_aliases:             # corpus-derived; extend per product line
+    DrillOps: ["drillops", "drill ops", "rtdms"]
+    "Lumi for Operations": ["lumi for ops", "lumi ops", "lumi for operations"]
+    "Lumi for Drilling": ["lumi for drilling"]
+    OptiSite: ["optisite", "artemis"]
+
+grounding:                     # docs/06 §3.1 atom extraction
+  gazetteers:
+    organizations:             # business identities (not PII); aliases resolve to one canonical name
+      # Synthetic examples. Replace with the SLB customer gazetteer (sourced from CRM, not hand-maintained).
+      "Contoso Energy": ["CNE", "Contoso"]
+      "Fabrikam Petroleum": ["FPC", "Fabrikam"]
+      "Northwind Offshore": ["NWO", "Northwind"]
+    products: ["DrillOps", "Lumi", "OptiSite", "WITSML", "WODF"]
+  atom_patterns:
+    ado_work_item: '\b\d{6,8}\b'
+    pagerduty_incident: 'PD\s*#\s*(\d+)'
+    servicenow_case: '\bCS\d{7}\b'
+    servicenow_incident: '\bINC\d{7}\b'
+    version: '\b\d+\.\d+(?:\.\d+){0,2}\b'
+  custom_infotypes:            # secrets SDP has no built-in detector for (docs/06 §5.2)
+    ADO_OR_GITHUB_PAT: '\b[a-z0-9]{52}\b'
+    AZURE_SAS_SIGNATURE: 'sig=[A-Za-z0-9%/+=]{20,}'
+    CONNECTION_STRING_PASSWORD: '(?i)(password|pwd|accountkey)\s*=\s*[^;\s]+'
+    PRIVATE_KEY_BLOCK: '-----BEGIN [A-Z ]*PRIVATE KEY-----'
+
+readiness_checklist:           # FR-A5 (slb-readiness-v1)
+  id: slb-readiness-v1
+  items: [who_affected, current_vs_desired_workflow, should_do_should_not, acceptance_criteria, edge_cases, dependencies_constraints]
+
+templates:                     # docs/10 §4.2 — derived from the corpus; SLB to confirm (Q-04)
+  slb-ado-requirement-v1:
+    work_item_type: "PLACEHOLDER:Q-04:ado_requirement_type"
+    fields: [summary, user_workflow, desired_outcome, in_scope, out_of_scope, acceptance_criteria, edge_cases, dependencies, technical_constraints]
+    ado_field_map:
+      summary: System.Title
+      acceptance_criteria: Microsoft.VSTS.Common.AcceptanceCriteria
+      _description: System.Description          # rendered PRD body (all remaining fields as sections)
+      _tags: System.Tags
+  slb-initiative-v1:
+    work_item_type: "PLACEHOLDER:Q-04:ado_initiative_type"
+    fields: [business_driver, personas, deployment_customer_timing, business_goals, business_acceptance_criteria,
+             user_workflow, business_constraints, applications_involved, requirements_by_phase, roadmap,
+             architecture_definition, technical_constraints, engineering_acceptance_criteria]
+    advisory_fields: [architecture_definition, engineering_acceptance_criteria]
+
+connectors:                    # docs/09 — read and write servers use separately scoped credentials
+  ado:
+    organization: "PLACEHOLDER:Q-04:ado_organization"
+    project: "PLACEHOLDER:Q-04:ado_project"
+    api_version: "7.1"
+    area_paths: "PLACEHOLDER:Q-04:ado_area_paths"
+  servicenow:
+    instance_url: "PLACEHOLDER:Q-05:servicenow_instance_url"
+    tables: [incident, sc_request, sc_req_item]
+  pagerduty:
+    api_base: "https://api.pagerduty.com"
+    service_ids: "PLACEHOLDER:Q-07:pagerduty_service_ids"
+  msgraph:
+    tenant_id: "PLACEHOLDER:Q-08:entra_tenant_id"
+    mailboxes: "PLACEHOLDER:Q-13:mailboxes_in_scope"
+    sites: "PLACEHOLDER:Q-13:sharepoint_sites_in_scope"
+  figma:
+    team_id: "PLACEHOLDER:Q-02:figma_team_id"
+    dls_library_file_key: "PLACEHOLDER:Q-03:dls_library_file_key"
+    renderer_path: plugin       # ADR-006: plugin (now) | mcp_use_figma (after Figma MCP Catalog admission)
+  kb:
+    backend: "PLACEHOLDER:Q-01:kb_backend"   # servicenow_km | confluence | sharepoint | ado_wiki | slb_internal
+    base_url: "PLACEHOLDER:Q-01:kb_base_url"
+
+outreach:
+  shared_mailbox: "PLACEHOLDER:Q-14:outreach_shared_mailbox"

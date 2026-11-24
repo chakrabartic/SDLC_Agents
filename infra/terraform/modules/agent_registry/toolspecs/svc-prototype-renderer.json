@@ -1,0 +1,38 @@
+{
+  "tools": [
+    {
+      "name": "release_prototype_spec",
+      "description": "Release an approved PrototypeSpec to the private SLB Figma plugin (token-gated, ADR-006)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "approval_token": {
+            "type": "string",
+            "description": "KMS-signed single-use JWS (docs/07 \u00a76)"
+          },
+          "action_id": {
+            "type": "string"
+          },
+          "payload": {
+            "type": "object"
+          },
+          "validate_only": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": true,
+        "required": [
+          "approval_token",
+          "action_id",
+          "payload"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    }
+  ]
+}

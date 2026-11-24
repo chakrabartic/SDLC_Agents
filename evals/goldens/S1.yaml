@@ -1,0 +1,14 @@
+# S1 golden scenario (docs/13 §2) — stub until sanitized fixtures are approved (Q-11).
+id: S1
+title: "Standardized-log channel missing after a late mapping-file upload"
+status: placeholder
+fixture: "PLACEHOLDER:Q-11:s1_fixture"
+signals:
+  - "pagerduty incident + notes"
+  - "email thread"
+  - "follow-up question from the PM"
+expected:
+  - "one product problem (knowledge_gap or workflow_problem)"
+  - "knowledge article draft: the mapping must exist before the channel streams"
+  - "enhancement candidate linked to the existing failure-mode requirement"
+gates: [E3]

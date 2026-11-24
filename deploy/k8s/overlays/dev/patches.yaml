@@ -1,0 +1,90 @@
+# Strategic-merge patches for dev (values from `terraform output k8s_overlay_values`).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: signal-event-gateway
+  annotations:
+    iam.gke.io/gcp-service-account: sa-gke-signal-event-gateway@chayan-genai-bb.iam.gserviceaccount.com
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: correlation-engine
+  annotations:
+    iam.gke.io/gcp-service-account: sa-gke-correlation-engine@chayan-genai-bb.iam.gserviceaccount.com
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dls-catalog-sync
+  annotations:
+    iam.gke.io/gcp-service-account: sa-gke-dls-catalog-sync@chayan-genai-bb.iam.gserviceaccount.com
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ledger-anchor
+  annotations:
+    iam.gke.io/gcp-service-account: sa-mcp-ledger@chayan-genai-bb.iam.gserviceaccount.com
+---
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: signal-event-gateway
+spec:
+  securityPolicy:
+    name: pm-agent-dev-event-gateway
+---
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: signal-event-gateway
+spec:
+  domains:
+    - "PLACEHOLDER:Q-10:event_gateway_hostname" # dev workaround: <static-ip-with-dashes>.sslip.io
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: signal-event-gateway
+  annotations:
+    kubernetes.io/ingress.global-static-ip-name: pm-agent-dev-event-gateway
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: mcp-correlation
+spec:
+  addresses:
+    - type: NamedAddress
+      value: pm-agent-dev-correlation-ilb
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dls-catalog-sync
+spec:
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: sync
+              env:
+                - name: PM_AGENT_CREDENTIAL_SECRETS
+                  value: projects/chayan-genai-bb/secrets/figma-plan-access-token
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ledger-anchor
+spec:
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: anchor
+              env:
+                - name: PM_AGENT_LEDGER_EXPORTS_BUCKET
+                  value: chayan-genai-bb-pm-agent-ledger-exports-dev

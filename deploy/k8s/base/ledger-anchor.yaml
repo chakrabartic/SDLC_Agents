@@ -1,0 +1,64 @@
+# ledger-anchor: every 5 min writes the ledger chain head (seq, entry_hash) to the locked Cloud Logging bucket
+# pm-agent-ledger; nightly writes the signed segment export to the Bucket-Locked GCS bucket (docs/07 §8.1).
+# Runs as SA-LEDGER (KSA ledger-anchor -> sa-mcp-ledger) because only the ledger identity may sign.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: ledger-anchor
+  labels:
+    app.kubernetes.io/name: ledger-anchor
+spec:
+  schedule: "*/5 * * * *"
+  timeZone: "Etc/UTC"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 240
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 10
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 240
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: ledger-anchor
+        spec:
+          serviceAccountName: ledger-anchor
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            fsGroup: 10001
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: anchor
+              image: pm-agent/ledger-anchor
+              envFrom:
+                - configMapRef:
+                    name: pm-agent-env
+              env:
+                - name: PM_AGENT_COMPONENT
+                  value: ledger-anchor
+                - name: PM_AGENT_LEDGER_LOG
+                  value: pm-agent-ledger
+                - name: PM_AGENT_LEDGER_EXPORTS_BUCKET
+                  value: SET_BY_OVERLAY # Terraform output data.ledger_exports_bucket
+              resources:
+                requests:
+                  cpu: 250m
+                  memory: 256Mi
+                limits:
+                  memory: 256Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir: {}

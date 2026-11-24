@@ -1,0 +1,308 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "slb.com:pm_workbench_v1",
+  "protocolVersion": "1.0",
+  "title": "SLB PM Workbench catalog v1",
+  "description": "Domain components of the SLB PM Workbench (docs/11 §4). Layout comes from the A2UI v1.0 basic catalog; every component below is mixed into basic-catalog surfaces with \"@catalogId\": \"slb.com:pm_workbench_v1\". Additive-only versioning: a breaking change gets a new catalog id (pm_workbench_v2). Data-bound props receive canonical PM Agent entity JSON (docs/10, snake_case field names) from the surface data model. Visual styling uses SLB DLS tokens in the Angular implementation — PLACEHOLDER until the token set is supplied (Q-03).",
+  "catalogId": "slb.com:pm_workbench_v1",
+  "instructions": "Use the basic catalog (Column, Row, Card, Tabs, Text, Button) for layout and these components for PM Agent domain content.\n\n1. Every factual statement is shown through ClaimList (or EvidencePanel / CitationChip) so that it carries its citations; never restate a claim in plain Text.\n2. Claims whose kind is 'inference' are not facts: ClaimList renders them in the distinct 'inferred — needs your confirmation' style.\n3. ApprovalCard, FieldDiff, VerifierBadge and ReadinessChecklist are decision components: they are emitted only by the deterministic surface builders in pm_agent.a2ui.surfaces, never by a model.\n4. Show SourceHealth whenever a connector was unavailable (partial data must be visible).\n5. Bind object and list props to the data model with {\"@path\": ...}; literal values must follow the shapes in $defs.",
+  "components": {
+    "CitationChip": {
+      "type": "object",
+      "description": "Inline citation for one evidence span. Activating the chip opens the cited source at its permalink (docs/11 §7.1: every factual sentence carries a chip).",
+      "properties": {
+        "component": {"const": "CitationChip"},
+        "evidenceId": {"$ref": "common_types.json#/$defs/DynamicString", "description": "EvidenceChunk id (ev_…) the citation resolves to."},
+        "sourceSystem": {"$ref": "common_types.json#/$defs/DynamicString", "description": "Source system of the cited record (ado, servicenow, pagerduty, …)."},
+        "recordId": {"$ref": "common_types.json#/$defs/DynamicString", "description": "Record id in the source system (e.g. an ADO work item or ServiceNow case number)."},
+        "permalink": {"$ref": "common_types.json#/$defs/DynamicString", "description": "Resolvable deep link to the cited record."},
+        "quote": {"$ref": "common_types.json#/$defs/DynamicString", "description": "Optional exact quote shown on hover / focus."}
+      },
+      "required": ["component", "evidenceId", "sourceSystem", "recordId", "permalink"]
+    },
+    "EvidencePanel": {
+      "type": "object",
+      "description": "Source excerpt with the cited span highlighted, its provenance (pseudonymous author, record, time) and — only when revealAllowed — a re-identification affordance handled by the BFF (mcp-store.reveal, ledger-logged).",
+      "properties": {
+        "component": {"const": "EvidencePanel"},
+        "quote": {"$ref": "common_types.json#/$defs/DynamicString", "description": "Exact cited quote (redacted text)."},
+        "span": {"description": "Character offsets of the quote inside the evidence chunk.", "oneOf": [{"$ref": "common_types.json#/$defs/DataBinding"}, {"$ref": "#/$defs/Span"}]},
+        "signal": {"description": "Provenance of the cited record.", "oneOf": [{"$ref": "common_types.json#/$defs/DataBinding"}, {"$ref": "#/$defs/SignalRef"}]},
+        "revealAllowed": {"$ref": "common_types.json#/$defs/DynamicBoolean", "description": "Whether the viewer may request re-identification of pseudonyms. Defaults to false."}
+      },
+      "required": ["component", "quote", "signal"]
+    },
+    "ClaimList": {
+      "type": "object",
+      "description": "Renders one drafted field (DraftField): each claim with its citations as CitationChips; inference claims visually distinct with a 'needs your confirmation' affordance; an empty missing field renders as 'missing — see clarifying question'.",
+      "properties": {
+        "component": {"const": "ClaimList"},
+        "claims": {"description": "Canonical Claim JSON objects (docs/10 §2.3).", "oneOf": [{"$ref": "common_types.json#/$defs/DataBinding"}, {"type": "array", "items": {"$ref": "#/$defs/Claim"}}]},
+        "fieldStatus": {"description": "DraftField status.", "oneOf": [{"$ref": "common_types.json#/$defs/DataBinding"}, {"$ref": "#/$defs/FieldStatus"}]},
+        "label": {"$ref": "common_types.json#/$defs/DynamicString", "description": "Human label of the field (e.g. 'Acceptance criteria')."}
+      },
+      "required": ["component", "claims"]
+    },
+    "VerifierBadge": {
+      "type": "object",
+      "description": "Verifier outcome (PASS / FAIL / NEEDS_PM_DECISION), per-check V0–V10 status, blocked-claim count and a link to the signed report.",
+      "properties": {
+        "component": {"const": "VerifierBadge"},
+        "report": {"description": "Canonical VerificationReport JSON.", "oneOf": [{"$ref": "common_types.json#/$defs/DataBinding"}, {"$ref": "#/$defs/VerificationReport"}]}
+      },
+      "required": ["component", "report"]
+    },
+    "ApprovalCard": {
+      "type": "object",
+      "description": "Summary of a proposed state-changing action exactly as registered with the ledger: action type, target, payload, payload hash, risk flags, expiry, verifier report and optional diff. Decision buttons are separate basic-catalog Buttons.",
+      "properties": {
+        "component": {"const": "ApprovalCard"},
+        "action": {"description": "Canonical ProposedAction JSON.", "oneOf": [{"$ref": "common_types.json#/$defs/DataBinding"}, {"$ref": "#/$defs/ProposedAction"}]},
+        "report": {"description": "Canonical VerificationReport JSON backing the action.", "oneOf": [{"$ref": "common_types.json#/$defs/DataBinding"}, {"$ref": "#/$defs/VerificationReport"}]},
+        "diff": {"description": "Draft vs. existing object ({} when there is nothing to compare).", "oneOf": [{"$ref": "common_types.json#/$defs/DataBinding"}, {"$ref": "#/$defs/Diff"}]}
+      },
+      "required": ["component", "action", "report"]
+    },
+    "FieldDiff": {
+      "type": "object",
+      "description": "Side-by-side diff of the draft against the existing ADO / KB object or the previous version.",
+      "properties": {
+        "component": {"const": "FieldDiff"},
+        "before": {"description": "Existing value (null when the object is new).", "anyOf": [{"$ref": "common_types.json#/$defs/DataBinding"}, {"$ref": "#/$defs/JsonValue"}]},
+        "after": {"description": "Proposed value.", "anyOf": [{"$ref": "common_types.json#/$defs/DataBinding"}, {"$ref": "#/$defs/JsonValue"}]},
+        "label": {"$ref": "common_types.json#/$defs/DynamicString", "description": "Optional caption."}
+      },
+      "required": ["component", "before", "after"]
+    },
+    "ReadinessChecklist": {
+      "type": "object",
+      "description": "The six FR-A5 readiness items with status (present / partial / missing), supporting claims, the gap and the linked clarifying questions.",
+      "properties": {
+        "component": {"const": "ReadinessChecklist"},
+        "items": {"description": "Canonical ReadinessItem JSON objects.", "oneOf": [{"$ref": "common_types.json#/$defs/DataBinding"}, {"type": "array", "items": {"$ref": "#/$defs/ReadinessItem"}}]}
+      },
+      "required": ["component", "items"]
+    },
+    "DataTable": {
+      "type": "object",
+      "description": "Tabular data (ticket lists, aggregates, mappings). Rows are flat objects keyed by column key; cell values are plain text — never Markdown.",
+      "properties": {
+        "component": {"const": "DataTable"},
+        "columns": {"oneOf": [{"$ref": "common_types.json#/$defs/DataBinding"}, {"type": "array", "items": {"$ref": "#/$defs/TableColumn"}}]},
+        "rows": {"oneOf": [{"$ref": "common_types.json#/$defs/DataBinding"}, {"type": "array", "items": {"$ref": "#/$defs/TableRow"}}]},
+        "caption": {"$ref": "common_types.json#/$defs/DynamicString", "description": "Optional visible caption."}
+      },
+      "required": ["component", "columns", "rows"]
+    },
+    "Timeline": {
+      "type": "object",
+      "description": "Chronological events (investigation timelines, ledger history). Events backed by a claim show its citations.",
+      "properties": {
+        "component": {"const": "Timeline"},
+        "events": {"oneOf": [{"$ref": "common_types.json#/$defs/DataBinding"}, {"type": "array", "items": {"$ref": "#/$defs/TimelineEvent"}}]}
+      },
+      "required": ["component", "events"]
+    },
+    "TraceGraph": {
+      "type": "object",
+      "description": "Evidence chain Customer → Problem → Bug → Engineering discussion → Resolution → Requirement → Roadmap decision (AC7).",
+      "properties": {
+        "component": {"const": "TraceGraph"},
+        "nodes": {"oneOf": [{"$ref": "common_types.json#/$defs/DataBinding"}, {"type": "array", "items": {"$ref": "#/$defs/TraceNode"}}]},
+        "links": {"oneOf": [{"$ref": "common_types.json#/$defs/DataBinding"}, {"type": "array", "items": {"$ref": "#/$defs/TraceEdge"}}]}
+      },
+      "required": ["component", "nodes", "links"]
+    },
+    "PrototypePreview": {
+      "type": "object",
+      "description": "Rendered prototype screens with the DLS component-reuse overlay (FR-B2/B3).",
+      "properties": {
+        "component": {"const": "PrototypePreview"},
+        "images": {"$ref": "common_types.json#/$defs/DynamicStringList", "description": "Screen image URLs, in screen order."},
+        "reuse": {"description": "DLS reuse statistics.", "oneOf": [{"$ref": "common_types.json#/$defs/DataBinding"}, {"$ref": "#/$defs/Reuse"}]}
+      },
+      "required": ["component", "images"]
+    },
+    "SourceHealth": {
+      "type": "object",
+      "description": "Per-connector health banner; loud whenever a source was unavailable so partial data is never silent (IR3).",
+      "properties": {
+        "component": {"const": "SourceHealth"},
+        "sources": {"oneOf": [{"$ref": "common_types.json#/$defs/DataBinding"}, {"type": "array", "items": {"$ref": "#/$defs/SourceStatus"}}]}
+      },
+      "required": ["component", "sources"]
+    }
+  },
+  "functions": {},
+  "$defs": {
+    "JsonValue": {"description": "Any JSON value.", "type": ["object", "array", "string", "number", "boolean", "null"]},
+    "Span": {
+      "type": "object",
+      "properties": {"start": {"type": "integer", "minimum": 0}, "end": {"type": "integer", "minimum": 1}},
+      "required": ["start", "end"]
+    },
+    "Citation": {
+      "type": "object",
+      "description": "Canonical Citation JSON. Rendered as a CitationChip with evidenceId=evidence_id, sourceSystem=source_system, recordId=source_record_id, permalink=permalink.",
+      "properties": {
+        "evidence_id": {"type": "string", "minLength": 1},
+        "signal_id": {"type": "string"},
+        "source_system": {"type": "string", "minLength": 1},
+        "source_record_id": {"type": "string", "minLength": 1},
+        "permalink": {"type": "string", "minLength": 1},
+        "span": {"$ref": "#/$defs/Span"},
+        "quote": {"type": "string"},
+        "quote_sha256": {"type": ["string", "null"]}
+      },
+      "required": ["evidence_id", "source_system", "source_record_id", "permalink"]
+    },
+    "ClaimKind": {"type": "string", "enum": ["fact", "classification", "aggregate", "pm_judgment", "inference", "procedural"]},
+    "Claim": {
+      "type": "object",
+      "description": "Canonical Claim JSON: one atomic statement with its citations.",
+      "properties": {
+        "claim_id": {"type": "string"},
+        "text": {"type": "string", "minLength": 1},
+        "kind": {"$ref": "#/$defs/ClaimKind"},
+        "citations": {"type": "array", "items": {"$ref": "#/$defs/Citation"}},
+        "verification": {"type": "object"}
+      },
+      "required": ["text", "kind", "citations"]
+    },
+    "FieldStatus": {"type": "string", "enum": ["populated", "partial", "missing", "inferred"]},
+    "ActionType": {"type": "string", "enum": ["ADO_CREATE_WORK_ITEM", "ADO_ADD_LINKS", "KB_PUBLISH_ARTICLE", "FIGMA_RENDER_PROTOTYPE", "FIGMA_POST_COMMENT", "PROTOTYPE_RELEASE_INTERNAL", "OUTREACH_SEND_INTERNAL", "ROADMAP_TRACE_LINK"]},
+    "ProposedAction": {
+      "type": "object",
+      "description": "Canonical ProposedAction JSON exactly as registered with mcp-ledger (docs/07).",
+      "properties": {
+        "action_id": {"type": "string", "minLength": 1},
+        "action_type": {"$ref": "#/$defs/ActionType"},
+        "target": {"type": "object"},
+        "payload": {"type": "object"},
+        "payload_sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "draft_ref": {"type": "string"},
+        "verification_report_id": {"type": "string", "minLength": 1},
+        "risk_flags": {"type": "array", "items": {"type": "string"}},
+        "expires_utc": {"type": ["string", "null"]},
+        "status": {"type": "string"},
+        "version": {"type": "integer", "minimum": 1}
+      },
+      "required": ["action_id", "action_type", "target", "payload", "payload_sha256", "verification_report_id"]
+    },
+    "CheckStatus": {"type": "string", "enum": ["PASS", "FAIL", "SKIPPED", "NEEDS_PM_DECISION"]},
+    "CheckResult": {
+      "type": "object",
+      "properties": {"check_id": {"type": "string", "minLength": 1}, "status": {"$ref": "#/$defs/CheckStatus"}, "details": {"type": "string"}},
+      "required": ["check_id", "status"]
+    },
+    "VerificationOutcome": {"type": "string", "enum": ["PASS", "FAIL", "NEEDS_PM_DECISION"]},
+    "VerificationReport": {
+      "type": "object",
+      "description": "Canonical VerificationReport JSON (signed by mcp-verifier).",
+      "properties": {
+        "report_id": {"type": "string", "minLength": 1},
+        "subject_ref": {"type": "object"},
+        "subject_sha256": {"type": "string"},
+        "verifier_version": {"type": "string"},
+        "checks": {"type": "array", "items": {"$ref": "#/$defs/CheckResult"}},
+        "overall": {"$ref": "#/$defs/VerificationOutcome"},
+        "blocked_claim_ids": {"type": "array", "items": {"type": "string"}}
+      },
+      "required": ["report_id", "checks", "overall", "blocked_claim_ids"]
+    },
+    "Diff": {
+      "type": "object",
+      "properties": {"before": {"$ref": "#/$defs/JsonValue"}, "after": {"$ref": "#/$defs/JsonValue"}},
+      "additionalProperties": false
+    },
+    "ReadinessItemName": {"type": "string", "enum": ["who_affected", "current_vs_desired_workflow", "should_do_should_not", "acceptance_criteria", "edge_cases", "dependencies_constraints"]},
+    "ReadinessStatus": {"type": "string", "enum": ["present", "partial", "missing"]},
+    "ReadinessItem": {
+      "type": "object",
+      "description": "Canonical ReadinessItem JSON (FR-A5).",
+      "properties": {
+        "item": {"$ref": "#/$defs/ReadinessItemName"},
+        "status": {"$ref": "#/$defs/ReadinessStatus"},
+        "claims": {"type": "array", "items": {"$ref": "#/$defs/Claim"}},
+        "gap": {"type": ["string", "null"]},
+        "question_ids": {"type": "array", "items": {"type": "string"}}
+      },
+      "required": ["item", "status"]
+    },
+    "TableColumn": {
+      "type": "object",
+      "properties": {"key": {"type": "string", "minLength": 1}, "label": {"type": "string"}},
+      "required": ["key", "label"]
+    },
+    "TableRow": {"type": "object", "additionalProperties": {"type": ["string", "number", "boolean", "null"]}},
+    "TimelineEvent": {
+      "type": "object",
+      "properties": {
+        "at": {"type": ["string", "null"], "description": "ISO 8601 timestamp, or null when the source gives none."},
+        "label": {"type": "string", "minLength": 1},
+        "kind": {"type": "string"},
+        "detail": {"type": "string"},
+        "claim": {"$ref": "#/$defs/Claim"}
+      },
+      "required": ["label"]
+    },
+    "TraceNode": {
+      "type": "object",
+      "properties": {"node_id": {"type": "string", "minLength": 1}, "node_type": {"type": "string", "minLength": 1}, "label": {"type": "string"}},
+      "required": ["node_id", "node_type", "label"]
+    },
+    "TraceEdge": {
+      "type": "object",
+      "properties": {"source": {"type": "string", "minLength": 1}, "target": {"type": "string", "minLength": 1}, "link_type": {"type": "string", "minLength": 1}, "status": {"type": "string"}},
+      "required": ["source", "target", "link_type"]
+    },
+    "Reuse": {
+      "type": "object",
+      "properties": {
+        "reuse_ratio": {"type": "number", "minimum": 0, "maximum": 1},
+        "reused_components": {"type": "integer", "minimum": 0},
+        "new_patterns": {"type": "integer", "minimum": 0},
+        "min_reuse_ratio": {"type": "number", "minimum": 0, "maximum": 1}
+      },
+      "required": ["reuse_ratio"]
+    },
+    "SignalRef": {
+      "type": "object",
+      "description": "Provenance of a cited record (pseudonymous author only).",
+      "properties": {
+        "signal_id": {"type": "string", "minLength": 1},
+        "source_system": {"type": "string", "minLength": 1},
+        "source_record_id": {"type": "string", "minLength": 1},
+        "permalink": {"type": "string", "minLength": 1},
+        "record_type": {"type": ["string", "null"]},
+        "captured_utc": {"type": ["string", "null"]},
+        "title": {"type": ["string", "null"]},
+        "author": {"type": ["object", "null"]}
+      },
+      "required": ["signal_id", "source_system", "source_record_id", "permalink"]
+    },
+    "SourceStatus": {
+      "type": "object",
+      "properties": {"source": {"type": "string", "minLength": 1}, "status": {"type": "string", "minLength": 1}, "healthy": {"type": "boolean"}},
+      "required": ["source", "status", "healthy"]
+    },
+    "anyComponent": {
+      "oneOf": [
+        {"$ref": "#/components/CitationChip"},
+        {"$ref": "#/components/EvidencePanel"},
+        {"$ref": "#/components/ClaimList"},
+        {"$ref": "#/components/VerifierBadge"},
+        {"$ref": "#/components/ApprovalCard"},
+        {"$ref": "#/components/FieldDiff"},
+        {"$ref": "#/components/ReadinessChecklist"},
+        {"$ref": "#/components/DataTable"},
+        {"$ref": "#/components/Timeline"},
+        {"$ref": "#/components/TraceGraph"},
+        {"$ref": "#/components/PrototypePreview"},
+        {"$ref": "#/components/SourceHealth"}
+      ],
+      "discriminator": {"propertyName": "component"}
+    },
+    "anyFunction": {"description": "This catalog defines no functions; function calls resolve against the basic catalog.", "not": {}}
+  }
+}

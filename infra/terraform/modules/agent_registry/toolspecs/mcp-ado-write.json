@@ -1,0 +1,72 @@
+{
+  "tools": [
+    {
+      "name": "create_work_item",
+      "description": "Create an approved work item (validateOnly pre-flight supported)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "approval_token": {
+            "type": "string",
+            "description": "KMS-signed single-use JWS (docs/07 \u00a76)"
+          },
+          "action_id": {
+            "type": "string"
+          },
+          "payload": {
+            "type": "object"
+          },
+          "validate_only": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": true,
+        "required": [
+          "approval_token",
+          "action_id",
+          "payload"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "add_relations",
+      "description": "Add Related/Hyperlink relations to an approved work item",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "approval_token": {
+            "type": "string",
+            "description": "KMS-signed single-use JWS (docs/07 \u00a76)"
+          },
+          "action_id": {
+            "type": "string"
+          },
+          "payload": {
+            "type": "object"
+          },
+          "validate_only": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": true,
+        "required": [
+          "approval_token",
+          "action_id",
+          "payload"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    }
+  ]
+}

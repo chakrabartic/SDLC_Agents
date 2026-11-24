@@ -1,0 +1,74 @@
+{
+  "version": "golden-2026-11-24.1",
+  "synthetic": true,
+  "description": "Coherent synthetic golden set for W1 ingestion, correlation, readiness and redaction tests. Record ids are Signal.source_record_id values (PD = incident number, ServiceNow = record number, ADO comment = '<work item id>:<comment id>', tracker row = '<item id>!<sheet>!<row>').",
+  "problems": {
+    "P1": {
+      "title": "Standardized log channel not populated after a late mapping-file upload",
+      "product": "DrillOps",
+      "customers": ["Contoso Energy"],
+      "records": [
+        {"system": "pagerduty", "record_id": "90000123", "record_type": "incident"},
+        {"system": "pagerduty", "record_id": "PNOTE0P1A", "record_type": "journal_note"},
+        {"system": "pagerduty", "record_id": "PLOG0P1TRIG", "record_type": "journal_note"},
+        {"system": "pagerduty", "record_id": "PLOG0P1ACK", "record_type": "journal_note"},
+        {"system": "pagerduty", "record_id": "PLOG0P1RES", "record_type": "journal_note"},
+        {"system": "servicenow", "record_id": "INC9000456", "record_type": "incident"},
+        {"system": "servicenow", "record_id": "CS9000123", "record_type": "case"},
+        {"system": "servicenow", "record_id": "1b2c3d4e5f6071829304a5b6c7d8e9f0", "record_type": "journal_note"},
+        {"system": "servicenow", "record_id": "2c3d4e5f60718293a4b5c6d7e8f90a1b", "record_type": "journal_note"},
+        {"system": "ado", "record_id": "9100123", "record_type": "work_item"},
+        {"system": "ado", "record_id": "9100123:5011", "record_type": "comment"},
+        {"system": "email", "record_id": "AAMkADEMO-P1-MSG-001", "record_type": "email_message"},
+        {"system": "email", "record_id": "AAMkADEMO-P1-MSG-002", "record_type": "email_message"},
+        {"system": "onedrive", "record_id": "01DEMOTRACKER0001!Tracker!2", "record_type": "tracker_row"}
+      ],
+      "readiness_gaps": ["acceptance_criteria", "edge_cases"]
+    },
+    "P2": {
+      "title": "Bulk export of depth logs to the rig WITSML store",
+      "product": "Lumi for Drilling",
+      "customers": ["Fabrikam Petroleum", "Northwind Offshore"],
+      "records": [
+        {"system": "ado", "record_id": "9100456", "record_type": "work_item"},
+        {"system": "email", "record_id": "AAMkADEMO-P2-MSG-001", "record_type": "email_message"},
+        {"system": "email", "record_id": "AAMkADEMO-P2-MSG-002", "record_type": "email_message"},
+        {"system": "onedrive", "record_id": "01DEMODOC0002", "record_type": "document"},
+        {"system": "onedrive", "record_id": "01DEMOTRACKER0001!Tracker!3", "record_type": "tracker_row"}
+      ],
+      "readiness_gaps": ["edge_cases", "dependencies_constraints"]
+    }
+  },
+  "noise": [
+    {"system": "pagerduty", "record_id": "90000124", "record_type": "incident"},
+    {"system": "pagerduty", "record_id": "PLOG0NZTRIG", "record_type": "journal_note"}
+  ],
+  "hard_links": [
+    {"from": {"system": "servicenow", "record_id": "1b2c3d4e5f6071829304a5b6c7d8e9f0"}, "to": {"system": "pagerduty", "record_id": "90000123"}, "pattern_id": "pd_hash"},
+    {"from": {"system": "servicenow", "record_id": "1b2c3d4e5f6071829304a5b6c7d8e9f0"}, "to": {"system": "ado", "record_id": "9100123"}, "pattern_id": "ado_url"},
+    {"from": {"system": "ado", "record_id": "9100123"}, "to": {"system": "servicenow", "record_id": "CS9000123"}, "pattern_id": "snow_case"},
+    {"from": {"system": "ado", "record_id": "9100123"}, "to": {"system": "pagerduty", "record_id": "90000123"}, "pattern_id": "pd_hash"},
+    {"from": {"system": "email", "record_id": "AAMkADEMO-P1-MSG-002"}, "to": {"system": "servicenow", "record_id": "CS9000123"}, "pattern_id": "snow_case"},
+    {"from": {"system": "email", "record_id": "AAMkADEMO-P1-MSG-002"}, "to": {"system": "ado", "record_id": "9100123"}, "pattern_id": "ado_named"}
+  ],
+  "exact_duplicates": [
+    {"system": "pagerduty", "record_id": "90000123", "source_version": "2026-05-09T12:40:00Z", "deliveries": 2,
+     "note": "re-delivered with its note and log entries, so those child signals are delivered twice as well"}
+  ],
+  "near_duplicates": [
+    {"a": {"system": "pagerduty", "record_id": "90000123"}, "b": {"system": "servicenow", "record_id": "INC9000456"},
+     "min_jaccard": 0.85, "note": "ServiceNow mirror of the PagerDuty incident: 'Mirrored from PagerDuty:' prefix and one reworded verb"}
+  ],
+  "secrets": [
+    {"system": "pagerduty", "record_id": "PNOTE0P1A", "info_type": "CONNECTION_STRING_PASSWORD", "raw_marker": "hunter2"},
+    {"system": "ado", "record_id": "9100123:5011", "info_type": "AUTH_TOKEN", "raw_marker": "3f9a1c0e7b2d4e6f8a0b1c2d3e4f5a6b"}
+  ],
+  "pii": [
+    {"system": "servicenow", "record_id": "CS9000123", "info_types": ["EMAIL_ADDRESS", "PHONE_NUMBER"]},
+    {"system": "pagerduty", "record_id": "PNOTE0P1A", "info_types": ["EMAIL_ADDRESS"]},
+    {"system": "email", "record_id": "AAMkADEMO-P1-MSG-001", "info_types": ["EMAIL_ADDRESS", "PHONE_NUMBER"]},
+    {"system": "email", "record_id": "AAMkADEMO-P2-MSG-001", "info_types": ["PHONE_NUMBER"]},
+    {"system": "onedrive", "record_id": "01DEMOTRACKER0001!Tracker!2", "info_types": ["EMAIL_ADDRESS"]}
+  ],
+  "raw_pii_markers": ["drilling.lead@contoso-energy.example.com", "555 010 4477", "7946 0958", "oncall.lead@ops.example.com", "pm.owner@pm.example.com"]
+}

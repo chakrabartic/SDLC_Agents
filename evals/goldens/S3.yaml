@@ -1,0 +1,11 @@
+# S3 golden scenario (docs/13 §2) — stub until sanitized fixtures are approved (Q-11).
+id: S3
+title: "Recurring time-index channel mismatch"
+status: placeholder
+fixture: "PLACEHOLDER:Q-11:s3_fixture"
+signals:
+  - "email thread"
+  - "prior knowledge documents"
+expected:
+  - "prior resolution surfaced before any drafting (AC5)"
+gates: [E3]

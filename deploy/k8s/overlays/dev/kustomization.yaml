@@ -1,0 +1,35 @@
+# dev overlay — values mirror `terraform output k8s_overlay_values` for envs/dev (project chayan-genai-bb).
+# CI sets image tags: kustomize edit set image pm-agent/<component>=<repo>/<component>:$SHORT_SHA
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: pm-agent
+
+resources:
+  - ../../base
+
+images:
+  - name: pm-agent/signal-event-gateway
+    newName: us-central1-docker.pkg.dev/chayan-genai-bb/pm-agent/signal-event-gateway
+    newTag: SET_BY_CI
+  - name: pm-agent/mcp-correlation
+    newName: us-central1-docker.pkg.dev/chayan-genai-bb/pm-agent/mcp-correlation
+    newTag: SET_BY_CI
+  - name: pm-agent/dls-catalog-sync
+    newName: us-central1-docker.pkg.dev/chayan-genai-bb/pm-agent/dls-catalog-sync
+    newTag: SET_BY_CI
+  - name: pm-agent/ledger-anchor
+    newName: us-central1-docker.pkg.dev/chayan-genai-bb/pm-agent/ledger-anchor
+    newTag: SET_BY_CI
+
+configMapGenerator:
+  - name: pm-agent-env
+    behavior: merge
+    literals:
+      - PM_AGENT_ENV=dev
+      - GOOGLE_CLOUD_PROJECT=chayan-genai-bb
+      - GOOGLE_CLOUD_LOCATION=us-central1
+      - PM_AGENT_VERIFIER_KEY=projects/chayan-genai-bb/locations/us-central1/keyRings/pm-agent-dev/cryptoKeys/verifier-report-signer/cryptoKeyVersions/1
+      - PM_AGENT_APPROVAL_KEY=projects/chayan-genai-bb/locations/us-central1/keyRings/pm-agent-dev/cryptoKeys/approval-token-signer/cryptoKeyVersions/1
+
+patches:
+  - path: patches.yaml

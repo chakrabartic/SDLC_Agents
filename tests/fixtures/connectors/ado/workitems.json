@@ -1,0 +1,89 @@
+{
+  "_meta": {
+    "synthetic": true,
+    "organization": "example-org",
+    "project": "ExampleProject",
+    "api_version": "7.1",
+    "shape": "workitemsbatch = POST {org}/{project}/_apis/wit/workitemsbatch?api-version=7.1 ($expand=Relations); comments = GET .../workItems/{id}/comments?api-version=7.1-preview.4"
+  },
+  "workitemsbatch": {
+    "count": 2,
+    "value": [
+      {
+        "id": 9100123,
+        "rev": 7,
+        "fields": {
+          "System.Id": 9100123,
+          "System.AreaPath": "ExampleProject\\DrillOps\\Standardization",
+          "System.TeamProject": "ExampleProject",
+          "System.IterationPath": "ExampleProject\\Sprint 41",
+          "System.WorkItemType": "Bug",
+          "System.State": "Active",
+          "System.Reason": "Approved",
+          "System.CreatedDate": "2026-05-09T13:05:00Z",
+          "System.ChangedDate": "2026-05-11T09:30:00Z",
+          "System.CreatedBy": {"displayName": "Engineering Lead (synthetic)", "uniqueName": "eng.lead@eng.example.com"},
+          "System.ChangedBy": {"displayName": "Engineering Lead (synthetic)", "uniqueName": "eng.lead@eng.example.com"},
+          "System.Title": "Standardized log channel not populated when the mapping file is uploaded after streaming starts",
+          "System.Tags": "golden-p1; standardization",
+          "System.Description": "",
+          "Microsoft.VSTS.TCM.ReproSteps": "<div>1. Start streaming source log TIME_RT_WITSML for WELL-0042(h).</div><div>2. Upload the standardization mapping file after channel TVDHD has already streamed.</div><div>3. Open the standardized log TIME_SURFACE: TVDHD stays empty until the mapping file is uploaded again.</div><div>Reported by Contoso Energy in CS9000123; incident PD #90000123.</div>",
+          "Microsoft.VSTS.Common.Priority": 2,
+          "Microsoft.VSTS.Common.Severity": "2 - High"
+        },
+        "relations": [
+          {
+            "rel": "Hyperlink",
+            "url": "https://example.service-now.com/sn_customerservice_case.do?sys_id=0a1b2c3d4e5f60718293a4b5c6d7e8f9",
+            "attributes": {"comment": "Customer case CS9000123"}
+          }
+        ],
+        "_links": {"html": {"href": "https://dev.azure.com/example-org/ExampleProject/_workitems/edit/9100123"}},
+        "url": "https://dev.azure.com/example-org/ExampleProject/_apis/wit/workItems/9100123"
+      },
+      {
+        "id": 9100456,
+        "rev": 3,
+        "fields": {
+          "System.Id": 9100456,
+          "System.AreaPath": "ExampleProject\\Lumi for Drilling\\Data Delivery",
+          "System.TeamProject": "ExampleProject",
+          "System.WorkItemType": "Feature",
+          "System.State": "New",
+          "System.Reason": "New",
+          "System.CreatedDate": "2026-05-12T10:00:00Z",
+          "System.ChangedDate": "2026-05-14T16:20:00Z",
+          "System.CreatedBy": {"displayName": "Product Manager (synthetic)", "uniqueName": "pm.owner@pm.example.com"},
+          "System.ChangedBy": {"displayName": "Product Manager (synthetic)", "uniqueName": "pm.owner@pm.example.com"},
+          "System.Title": "Bulk export of depth logs to the rig WITSML store",
+          "System.Tags": "golden-p2",
+          "System.Description": "<p>Rig-site teams export depth-indexed logs one log at a time to the rig WITSML store. Fabrikam Petroleum and Northwind Offshore asked for a single bulk export of all depth logs for a well.</p>",
+          "Microsoft.VSTS.Common.AcceptanceCriteria": "<ul><li>Given a well with depth logs, when the user selects Export all depth logs, then every depth log is written to the configured rig WITSML store.</li><li>Logs that the store rejects are listed with the store's error message.</li></ul>",
+          "Microsoft.VSTS.Common.Priority": 2
+        },
+        "relations": [],
+        "_links": {"html": {"href": "https://dev.azure.com/example-org/ExampleProject/_workitems/edit/9100456"}},
+        "url": "https://dev.azure.com/example-org/ExampleProject/_apis/wit/workItems/9100456"
+      }
+    ]
+  },
+  "comments": {
+    "9100123": {
+      "totalCount": 1,
+      "count": 1,
+      "comments": [
+        {
+          "workItemId": 9100123,
+          "id": 5011,
+          "version": 1,
+          "text": "<div>Workaround confirmed: upload the mapping file again, then trigger a backfill for the affected channel. For the staging replay use <code>curl -H \"Authorization: Bearer 3f9a1c0e7b2d4e6f8a0b1c2d3e4f5a6b\" https://api.example.invalid/replay</code> and rotate the token after use.</div>",
+          "createdBy": {"displayName": "L2 Support (synthetic)", "uniqueName": "l2.support@eng.example.com"},
+          "createdDate": "2026-05-10T08:15:00Z",
+          "modifiedDate": "2026-05-10T08:15:00Z",
+          "url": "https://dev.azure.com/example-org/ExampleProject/_apis/wit/workItems/9100123/comments/5011"
+        }
+      ]
+    },
+    "9100456": {"totalCount": 0, "count": 0, "comments": []}
+  }
+}

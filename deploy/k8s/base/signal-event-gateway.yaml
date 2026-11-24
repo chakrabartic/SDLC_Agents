@@ -1,0 +1,187 @@
+# signal-event-gateway: public webhook fan-in (ADO service hooks, ServiceNow outbound REST, PagerDuty Webhooks v3,
+# Graph change notifications). Verifies signatures and publishes HINTS ONLY to Pub/Sub signal-change-hints (T8).
+# External HTTPS LB (GKE Ingress) + Cloud Armor policy from infra/terraform/modules/gke.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: signal-event-gateway
+  labels:
+    app.kubernetes.io/name: signal-event-gateway
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: signal-event-gateway
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: signal-event-gateway
+    spec:
+      serviceAccountName: signal-event-gateway
+      automountServiceAccountToken: true
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: signal-event-gateway
+      containers:
+        - name: app
+          image: pm-agent/signal-event-gateway
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: pm-agent-env
+          env:
+            - name: PM_AGENT_COMPONENT
+              value: signal-event-gateway
+            - name: PORT
+              value: "8080"
+            - name: PM_AGENT_HINTS_TOPIC
+              value: signal-change-hints
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: signal-event-gateway
+  labels:
+    app.kubernetes.io/name: signal-event-gateway
+  annotations:
+    cloud.google.com/neg: '{"ingress": true}'
+    cloud.google.com/backend-config: '{"default": "signal-event-gateway"}'
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: signal-event-gateway
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+# Cloud Armor (rate limit / optional vendor allow-list) + health check for the external HTTPS LB.
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: signal-event-gateway
+spec:
+  securityPolicy:
+    name: SET_BY_OVERLAY # pm-agent-<env>-event-gateway (Terraform output event_gateway_security_policy)
+  timeoutSec: 30
+  logging:
+    enable: true
+    sampleRate: 1.0
+  healthCheck:
+    type: HTTP
+    requestPath: /healthz
+    port: 8080
+---
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: signal-event-gateway
+spec:
+  domains:
+    - event-gateway.example.invalid # overlay: event_gateway_hostname (PLACEHOLDER:Q-10:event_gateway_hostname)
+---
+apiVersion: networking.gke.io/v1beta1
+kind: FrontendConfig
+metadata:
+  name: signal-event-gateway
+spec:
+  redirectToHttps:
+    enabled: true
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: signal-event-gateway
+  annotations:
+    kubernetes.io/ingress.class: "gce"
+    kubernetes.io/ingress.global-static-ip-name: SET_BY_OVERLAY # Terraform output event_gateway_static_ip_name
+    networking.gke.io/managed-certificates: signal-event-gateway
+    networking.gke.io/v1beta1.FrontendConfig: signal-event-gateway
+spec:
+  defaultBackend:
+    service:
+      name: signal-event-gateway
+      port:
+        number: 80
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: signal-event-gateway
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: signal-event-gateway
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    # docs/12 §2: HPA 2-10 on RPS/CPU. CPU shown; add an RPS metric (LB request count via Custom Metrics adapter)
+    # once the Cloud Monitoring metrics adapter is installed.
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: signal-event-gateway
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: signal-event-gateway
