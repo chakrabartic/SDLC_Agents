@@ -22,9 +22,9 @@ from pm_agent.agents.factory import LlmNodes
 from pm_agent.agents.llm_schemas import FeasibilityOut, QuestionsOut, ReadinessOut, RequirementOut, to_claim_drafts
 from pm_agent.connectors.base import make_signal
 from pm_agent.grounding.chunking import chunk_signal
-from pm_agent.grounding.verifier import ClaimCheckResult, subject_digest
+from pm_agent.grounding.verifier import ClaimCheckResult
 from pm_agent.hitl.identity import IdentityError
-from pm_agent.runtime import Services
+from pm_agent.ports import Services
 from pm_agent.schemas import (
     ActionType,
     Actor,
@@ -51,8 +51,8 @@ from pm_agent.schemas import (
     SubjectRef,
     sha256_hex,
 )
-from pm_agent.workflows.common import dump_blocked, find_problem_id, problem_pack, request_text
-from pm_agent.workflows.approval import build_approval_nodes
+from pm_agent.workflows.common import dump_blocked, problem_pack, resolve_problem, save_draft
+from pm_agent.workflows.approval import build_approval_nodes, report_payload
 from pm_agent.workflows.rendering import render_ado_payload
 
 TEMPLATE = "slb-ado-requirement-v1"
@@ -76,6 +76,17 @@ def default_question(item: str) -> str:
     return f"Please provide the {item.replace('_', ' ')} for this problem."
 
 
+def _draft_field(checked: ClaimCheckResult) -> DraftField:
+    """Verified facts populate a field (PARTIAL if some claims were blocked); inference alone marks it INFERRED."""
+    facts = [c for c in checked.passed if c.kind is not ClaimKind.INFERENCE]
+    inferred = [c for c in checked.passed if c.kind is ClaimKind.INFERENCE]
+    if facts:
+        return DraftField(status=FieldStatus.PARTIAL if checked.blocked else FieldStatus.POPULATED, claims=facts)
+    if inferred:
+        return DraftField(status=FieldStatus.INFERRED, claims=inferred)
+    return DraftField(status=FieldStatus.MISSING)
+
+
 def build_define_requirement(services: Services, llm: LlmNodes) -> Any:  # pylint: disable=too-many-locals,too-many-statements
     """Return the ``define_requirement`` dynamic node (input: ``{"problem_id"}`` or text naming ``prb_…``)."""
     settings, verifier = services.settings, services.verifier
@@ -94,32 +105,31 @@ def build_define_requirement(services: Services, llm: LlmNodes) -> Any:  # pylin
         services.problems.save(services.problems.get(problem_id).model_copy(update=changes))
 
     def load_problem(node_input: Any) -> dict[str, Any]:
-        data = node_input if isinstance(node_input, dict) else {}
-        problem_id = data.get("problem_id") or find_problem_id(request_text(node_input))
-        if not problem_id:
-            return {"error": "no_problem", "message": "Which product problem? Mention its id (prb_...)."}
-        try:
-            services.problems.get(problem_id)
-        except LookupError:
-            return {"error": "unknown_problem", "message": f"No product problem {problem_id}."}
-        return {"problem_id": problem_id, "pack": problem_pack(services, problem_id)}
+        problem = resolve_problem(services, node_input, ask="Which product problem? Mention its id (prb_...).")
+        if isinstance(problem, dict):
+            return problem
+        return {"problem_id": problem.problem_id, "pack": problem_pack(services, problem.problem_id)}
+
+    def _readiness_item(name: str, out: Any) -> tuple[ReadinessItem, ClaimCheckResult]:
+        """One checklist item: PRESENT only with verified claims and nothing blocked; gaps never carry atoms."""
+        checked = verifier.check_claims(to_claim_drafts(out.claims)) if out else ClaimCheckResult()
+        if out and out.status == "present" and checked.passed and not checked.blocked:
+            status = ReadinessStatus.PRESENT
+        else:
+            status = ReadinessStatus.PARTIAL if checked.passed else ReadinessStatus.MISSING
+        gap_text = out.gap if out and out.gap and not services.atoms.has_atoms(out.gap) else None
+        gap = None if status is ReadinessStatus.PRESENT else (
+            gap_text or f"No verified evidence yet for {name.replace('_', ' ')}.")
+        return ReadinessItem(item=ReadinessItemName(name), status=status, claims=checked.passed, gap=gap), checked
 
     def verify_readiness(node_input: dict[str, Any]) -> dict[str, Any]:
         raw = ReadinessOut.model_validate(node_input["raw"])
         by_item = {str(item.item): item for item in raw.items}
         items, blocked = [], []
         for name in checklist.items:
-            out = by_item.get(name)
-            checked = verifier.check_claims(to_claim_drafts(out.claims)) if out else ClaimCheckResult()
+            item, checked = _readiness_item(name, by_item.get(name))
+            items.append(item)
             blocked += checked.blocked
-            if out and out.status == "present" and checked.passed and not checked.blocked:
-                status = ReadinessStatus.PRESENT
-            else:
-                status = ReadinessStatus.PARTIAL if checked.passed else ReadinessStatus.MISSING
-            gap_text = out.gap if out and out.gap and not services.atoms.has_atoms(out.gap) else None
-            items.append(ReadinessItem(item=ReadinessItemName(name), status=status, claims=checked.passed,
-                                       gap=None if status is ReadinessStatus.PRESENT else
-                                       gap_text or f"No verified evidence yet for {name.replace('_', ' ')}."))
         assessment = ReadinessAssessment(checklist_id=checklist.id, items=items)
         gaps = [i.item.value for i in assessment.gaps]
         _set_problem(node_input["problem_id"], readiness=assessment,
@@ -186,15 +196,7 @@ def build_define_requirement(services: Services, llm: LlmNodes) -> Any:  # pylin
             out = by_name.get(name)
             checked = verifier.check_claims(to_claim_drafts(out.claims)) if out else ClaimCheckResult()
             blocked += checked.blocked
-            facts = [c for c in checked.passed if c.kind is not ClaimKind.INFERENCE]
-            inferred = [c for c in checked.passed if c.kind is ClaimKind.INFERENCE]
-            if facts:
-                fields[name] = DraftField(status=FieldStatus.PARTIAL if checked.blocked else FieldStatus.POPULATED,
-                                          claims=facts)
-            elif inferred:
-                fields[name] = DraftField(status=FieldStatus.INFERRED, claims=inferred)
-            else:
-                fields[name] = DraftField(status=FieldStatus.MISSING)
+            fields[name] = _draft_field(checked)
         feasibility_raw = FeasibilityOut.model_validate(node_input["raw_feasibility"])
         feasibility_claims = verifier.check_claims(to_claim_drafts(feasibility_raw.claims))
         components = verifier.check_claims(to_claim_drafts(feasibility_raw.affected_components))
@@ -204,12 +206,9 @@ def build_define_requirement(services: Services, llm: LlmNodes) -> Any:  # pylin
                                  feasibility=FeasibilityAssessment(verdict=FeasibilityVerdict(feasibility_raw.verdict),
                                                                    claims=feasibility_claims.passed,
                                                                    affected_components=components.passed))
-        ref = services.subjects.put("requirement_draft", draft)
-        services.ledger.record(LedgerEntryType.DRAFT_SAVED, actor=Actor(type="agent", id=services.agent_id),
-                               subject_refs=[SubjectRef(type="requirement_draft", id=draft.requirement_id,
-                                                        version=draft.version, sha256=subject_digest(draft)),
-                                             SubjectRef(type="product_problem", id=draft.problem_id)],
-                               payload={"draft_ref": ref, "blocked_claims": len(blocked)})
+        ref = save_draft(services, "requirement_draft", draft,
+                         related=[SubjectRef(type="product_problem", id=draft.problem_id)],
+                         payload={"blocked_claims": len(blocked)})
         missing = [n for n, f in fields.items() if f.status is FieldStatus.MISSING]
         return {"draft_ref": ref, "blocked": dump_blocked(blocked), "missing": missing,
                 "missing_required": [n for n in REQUIRED_FIELDS if n in missing]}
@@ -220,14 +219,7 @@ def build_define_requirement(services: Services, llm: LlmNodes) -> Any:  # pylin
         payload = render_ado_payload(subject, template)
         report = verifier.verify_subject(subject, subject_type="requirement_draft", commit_bound=True,
                                          target_action=ADO, target_payload=payload)
-        services.reports[report.report_id] = report
-        services.ledger.record(LedgerEntryType.VERIFICATION_COMPLETED, actor=Actor(type="system", id="mcp-verifier"),
-                               subject_refs=[report.subject_ref],
-                               payload={"report_id": report.report_id, "overall": report.overall.value})
-        result: dict[str, Any] = {"draft_ref": node_input["draft_ref"], "report_id": report.report_id,
-                                  "overall": report.overall.value,
-                                  "failed": [f"{c.check_id}: {c.details}" for c in report.checks
-                                             if c.status.value == "FAIL"]}
+        result: dict[str, Any] = {"draft_ref": node_input["draft_ref"], **report_payload(services, report)}
         if report.overall.value == "NEEDS_PM_DECISION":
             text = " ".join(c.text for c in subject.all_claims())
             threshold = settings.verifier.near_duplicate_threshold
@@ -330,10 +322,7 @@ def build_define_requirement(services: Services, llm: LlmNodes) -> Any:  # pylin
         else:
             return {"status": "needs_input", "problem_id": problem_id, "problems": feedback,
                     "draft_ref": verified.get("draft_ref")}
-        proposal = await ctx.run_node(tail.propose, {"subject_ref": verified["draft_ref"],
-                                                     "report_id": verified["report_id"]})
-        await ctx.run_node(tail.await_approval, proposal)
-        outcome = await ctx.run_node(tail.commit, proposal)
+        outcome = await tail.run(ctx, {"subject_ref": verified["draft_ref"], "report": verified["report"]})
         return {**outcome, "problem_id": problem_id, "draft_ref": verified["draft_ref"]}
 
     return define_requirement

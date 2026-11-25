@@ -21,7 +21,7 @@ def _approved_action(services):  # type: ignore[no-untyped-def]
                                               target_action="ADO_CREATE_WORK_ITEM", target_payload=payload)
     action = services.approvals.propose(action_type="ADO_CREATE_WORK_ITEM", target={"system": "ado"},
                                         payload=payload, draft_ref=ref, report=report, proposed_by=LOCAL_AGENT_ID)
-    services.approvals.decide(action_id=action.action_id, decision=Decision.APPROVE,
+    services.approval_service.decide(action_id=action.action_id, decision=Decision.APPROVE,
                               assertion=services.identity.issue(PM))
     return action
 

@@ -15,18 +15,18 @@ from collections.abc import Callable, Mapping, Sequence
 from typing import Any, NoReturn
 
 from pm_agent.grounding.chunking import chunk_signal
-from pm_agent.grounding.evidence_store import InMemoryEvidenceStore
+from pm_agent.grounding.evidence_store import EvidenceRepository
 from pm_agent.grounding.redaction import Redactor
-from pm_agent.grounding.verifier import SUBJECT_TYPES, subject_digest
 from pm_agent.hitl.subjects import InMemorySubjectStore, SubjectStore
 from pm_agent.placeholders import not_implemented
-from pm_agent.schemas import Signal, SignalStatus, TraceLink
+from pm_agent.schemas import Signal, TraceLink
+from pm_agent.schemas.subjects import SUBJECT_TYPES, subject_digest
 
-NamedQuery = Callable[[InMemoryEvidenceStore, Mapping[str, Any]], list[dict[str, Any]]]
+NamedQuery = Callable[[EvidenceRepository, Mapping[str, Any]], list[dict[str, Any]]]
 
 
-def _active(store: InMemoryEvidenceStore) -> list[Signal]:
-    return [s for s in store.signals.values() if s.status is SignalStatus.ACTIVE]
+def _active(store: EvidenceRepository) -> list[Signal]:
+    return store.list_signals(active_only=True)
 
 
 def _brief(signal: Signal) -> dict[str, Any]:
@@ -35,23 +35,23 @@ def _brief(signal: Signal) -> dict[str, Any]:
             "permalink": signal.permalink, "captured_utc": signal.captured_utc.isoformat()}
 
 
-def _counts_by_source(store: InMemoryEvidenceStore, params: Mapping[str, Any]) -> list[dict[str, Any]]:
+def _counts_by_source(store: EvidenceRepository, params: Mapping[str, Any]) -> list[dict[str, Any]]:
     del params
     counts = Counter(s.source_system.value for s in _active(store))
     return [{"source_system": system, "count": count} for system, count in sorted(counts.items())]
 
 
-def _by_customer(store: InMemoryEvidenceStore, params: Mapping[str, Any]) -> list[dict[str, Any]]:
+def _by_customer(store: EvidenceRepository, params: Mapping[str, Any]) -> list[dict[str, Any]]:
     customer = str(params.get("customer") or "")
     return [_brief(s) for s in _active(store) if customer and s.customer.name == customer]
 
 
-def _by_product(store: InMemoryEvidenceStore, params: Mapping[str, Any]) -> list[dict[str, Any]]:
+def _by_product(store: EvidenceRepository, params: Mapping[str, Any]) -> list[dict[str, Any]]:
     product = str(params.get("product") or "")
     return [_brief(s) for s in _active(store) if product and s.product == product]
 
 
-def _referencing(store: InMemoryEvidenceStore, params: Mapping[str, Any]) -> list[dict[str, Any]]:
+def _referencing(store: EvidenceRepository, params: Mapping[str, Any]) -> list[dict[str, Any]]:
     system, record_id = str(params.get("system") or ""), str(params.get("record_id") or "")
     return [_brief(s) for s in _active(store)
             if any(r.system.value == system and r.record_id == record_id for r in s.cross_refs)]
@@ -66,8 +66,10 @@ NAMED_QUERIES: dict[str, NamedQuery] = {
 
 
 class InMemoryStoreService:
-    def __init__(self, evidence: InMemoryEvidenceStore, subjects: SubjectStore | None = None,
+    def __init__(self, evidence: EvidenceRepository, subjects: SubjectStore | None = None,
                  redactor: Redactor | None = None) -> None:
+        if redactor is None:
+            raise ValueError("InMemoryStoreService requires a redactor to enforce DM-5")
         self.evidence = evidence
         self.subjects = subjects or InMemorySubjectStore()
         self._redactor = redactor
@@ -84,7 +86,7 @@ class InMemoryStoreService:
                 if self.evidence.get_signal(signal.signal_id) is not None or signal.signal_id in stored:
                     duplicates.append(signal.signal_id)
                     continue
-                if self._redactor is not None and self._redactor.inspect(f"{signal.title or ''}\n{signal.raw_text}"):
+                if self._redactor.inspect(f"{signal.title or ''}\n{signal.raw_text}"):
                     rejected.append(signal.signal_id)
                     continue
                 self.evidence.add_signal(signal)
@@ -123,12 +125,17 @@ class InMemoryStoreService:
                 and (status is None or link.status == status)]
 
     def trace_propose_links(self, links: Sequence[Mapping[str, Any]]) -> list[str]:
-        """Store agent-proposed links (always ``status=proposed``); the PM decides via ROADMAP_TRACE_LINK."""
+        """Store agent-proposed links (always ``status=proposed``); refuses to overwrite a known ``link_id``."""
         proposed = [TraceLink.model_validate({**dict(link), "status": "proposed", "created_by": "agent"})
                     for link in links]
         with self._lock:
+            staged: dict[str, TraceLink] = {}
             for link in proposed:
-                self._links[link.link_id] = link
+                existing = staged.get(link.link_id) or self._links.get(link.link_id)
+                if existing is not None and existing.model_dump(mode="json") != link.model_dump(mode="json"):
+                    raise ValueError(f"trace link {link.link_id} already exists with different content")
+                staged[link.link_id] = link
+            self._links.update(staged)
         return [link.link_id for link in proposed]
 
     def run_named_query(self, name: str, params: Mapping[str, Any]) -> list[dict[str, Any]]:

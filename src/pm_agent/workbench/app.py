@@ -38,7 +38,7 @@ from pm_agent.core_app import build_core_app
 from pm_agent.hitl.approvals import ApprovalError
 from pm_agent.hitl.identity import IdentityError
 from pm_agent.hitl.resume import decision_resume, pending_interrupts, resume_content
-from pm_agent.runtime import Services, build_services
+from pm_agent.runtime import LocalServices, build_services
 from pm_agent.schemas import Approver, Decision
 
 IAP_HEADER = "x-goog-iap-jwt-assertion"
@@ -96,7 +96,7 @@ class _State:
     live_surfaces: dict[str, set[str]] = field(default_factory=dict)
 
 
-def create_app(services: Services | None = None, provider: ModelProvider | None = None) -> FastAPI:  # pylint: disable=too-many-statements
+def create_app(services: LocalServices | None = None, provider: ModelProvider | None = None) -> FastAPI:  # pylint: disable=too-many-statements
     """The BFF over one in-process ``pm_agent_core`` runner (production: A2A to Agent Runtime)."""
     services = services or build_services()
     core = build_core_app(services, provider or SettingsModelProvider(services.settings))
@@ -165,13 +165,13 @@ def create_app(services: Services | None = None, provider: ModelProvider | None 
         """Ledger first (identity, group, version, payload hash, freshness), then resume the paused workflow."""
         _pm(assertion)
         try:
-            pending = services.approvals.get_action(action_id)
+            pending = services.approval_service.get_action(action_id)
         except ApprovalError as exc:
             raise HTTPException(status_code=404, detail="unknown action") from exc
         if body.payload_sha256 is not None and body.payload_sha256 != pending.payload_sha256:
             raise HTTPException(status_code=409, detail="payload_changed")  # approve exactly what was shown (H-4)
         try:
-            outcome = services.approvals.decide(action_id=action_id, decision=body.decision,
+            outcome = services.approval_service.decide(action_id=action_id, decision=body.decision,
                                                 assertion=assertion or "", comment=body.comment,
                                                 expected_version=body.action_version)
         except ApprovalError as exc:
@@ -225,6 +225,17 @@ def create_app(services: Services | None = None, provider: ModelProvider | None 
                      ) -> dict[str, Any]:
         return await _decide(action_id, body, assertion)
 
+    async def _answer_from_ui(pm: Approver, context: dict[str, Any], capabilities: dict[str, Any] | None,
+                              assertion: str | None) -> dict[str, Any]:
+        """``answer_questions`` resumes this PM's pending question pause for ``problemId``."""
+        problem_id = context.get("problemId")
+        interrupt_id = next((iid for iid, pause in state.pauses.items() if pause.user_id == pm.sub
+                             and pause.payload.get("problem_id") == problem_id), None)
+        if interrupt_id is None:
+            raise HTTPException(status_code=404, detail="no pending questions for this problem")
+        answers = [{"question_id": qid, "text": text} for qid, text in dict(context.get("answers") or {}).items()]
+        return await _answer(interrupt_id, AnswerIn(answers=answers, a2uiRendererCapabilities=capabilities), assertion)
+
     @app.post("/api/ui-actions")
     async def ui_action(body: UiActionIn, assertion: str | None = Header(default=None, alias=IAP_HEADER)
                         ) -> dict[str, Any]:
@@ -242,14 +253,7 @@ def create_app(services: Services | None = None, provider: ModelProvider | None 
                 payloadSha256=context.get("payloadSha256"), a2uiRendererCapabilities=capabilities),
                 assertion)
         if action.name == ANSWER_QUESTIONS:
-            problem_id = context.get("problemId")
-            interrupt_id = next((iid for iid, pause in state.pauses.items() if pause.user_id == pm.sub
-                                 and pause.payload.get("problem_id") == problem_id), None)
-            if interrupt_id is None:
-                raise HTTPException(status_code=404, detail="no pending questions for this problem")
-            answers = [{"question_id": qid, "text": text} for qid, text in dict(context.get("answers") or {}).items()]
-            return await _answer(interrupt_id, AnswerIn(answers=answers, a2uiRendererCapabilities=capabilities),
-                                 assertion)
+            return await _answer_from_ui(pm, context, capabilities, assertion)
         capability = UI_CAPABILITIES.get(action.name)
         if capability is None:
             raise HTTPException(status_code=422, detail=f"event {action.name} is not handled by this BFF yet")

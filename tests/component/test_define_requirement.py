@@ -117,7 +117,7 @@ async def test_groundedness_gate_requirement_commits_only_verified_cited_claims(
     action = services.approvals.get_action(action_id)
     assert action.status is ActionStatus.PENDING_APPROVAL
     assert services.write_backends["mcp-ado-write"].calls == []  # nothing written before the PM decides
-    services.approvals.decide(action_id=action_id, decision=Decision.APPROVE, assertion=services.identity.issue(PM))
+    services.approval_service.decide(action_id=action_id, decision=Decision.APPROVE, assertion=services.identity.issue(PM))
     final = await session.send(decision_resume(approval.interrupt_id, action_id=action_id, decision="approve"),
                                invocation_id=paused.invocation_id)
     result = final.output_of("define_requirement")

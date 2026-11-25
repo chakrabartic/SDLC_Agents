@@ -67,3 +67,46 @@ def test_recluster_only_proposes_moves_for_provisional_links() -> None:
     found = recluster.proposals(local_settings(), store, problems)
     assert found and found[0]["to_problem"] == export.problem_id
     assert found[0]["action"] == "propose_move_for_pm_confirmation"
+
+
+
+def test_recluster_honours_configured_embedding_scorer_and_threshold() -> None:
+    """``recluster.proposals`` uses the active scorer's ``assign_threshold``, never a hard-coded lexical one."""
+    from types import SimpleNamespace
+    from pm_agent.correlation.scoring import EmbeddingScorer, make_scorer
+    from pm_agent.grounding.atoms import AtomExtractor
+
+    vectors = {
+        "bulk": [1.0, 0.0],
+        "tvdhd": [0.0, 1.0],
+    }
+
+    class _FakeGenAi:
+        class _Models:
+            @staticmethod
+            def embed_content(**kwargs: object) -> SimpleNamespace:
+                text = str(kwargs["contents"][0]).lower()  # type: ignore[index]
+                vec = vectors["bulk"] if "bulk" in text else vectors["tvdhd"]
+                return SimpleNamespace(embeddings=[SimpleNamespace(values=vec)])
+
+        models = _Models()
+
+    settings = local_settings()
+    scorer = EmbeddingScorer(settings, _FakeGenAi())
+    assert scorer.assign_threshold == settings.correlation.assign_threshold > settings.correlation.lexical_assign_threshold
+
+    store, problems = InMemoryEvidenceStore(), ProblemRepository()
+    export = _problem(store, problems, "Bulk export of depth logs.", [])
+    stray = make_signal(redactor=LocalRedactor.from_settings(settings, pseudonym_key=b"k"),
+                        source_system=SourceSystem.EMAIL, source_record_id="emb1", source_version="1",
+                        record_type=RecordType.EMAIL_MESSAGE, permalink="https://mail.example.invalid/emb1",
+                        raw_text="Need bulk export of depth logs daily.")
+    store.add_signal(stray)
+    # Score 0.70 is above lexical_assign_threshold (0.55) but below embedding assign_threshold (0.85): must be proposed!
+    _problem(store, problems, "Channel TVDHD missing from TIME_SURFACE.", [(stray.signal_id, 0.70)])
+    found = recluster.proposals(settings, store, problems, scorer=scorer)
+    assert found and found[0]["to_problem"] == export.problem_id and found[0]["score"] > 0.70
+
+    # make_scorer selects LexicalScorer offline.
+    assert make_scorer(settings, AtomExtractor.from_settings(settings)).assign_threshold == (
+        settings.correlation.lexical_assign_threshold)

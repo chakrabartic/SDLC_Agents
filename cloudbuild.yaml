@@ -25,7 +25,7 @@ steps:
   - id: gate-2-pylint
     name: python:3.13-slim
     entrypoint: bash
-    args: ["-c", ".venv/bin/python -m pylint src/pm_agent tools --fail-under=9.5"]
+    args: ["-c", ".venv/bin/python -m pylint src/pm_agent tools --fail-under=10"]   # ratchet: the codebase is at 10.00
     waitFor: [install]
 
   - id: gate-3-mypy-strict
@@ -34,23 +34,29 @@ steps:
     args: ["-c", ".venv/bin/python -m mypy"]
     waitFor: [install]
 
-  - id: gate-4-unit-contract-component     # no network, no LLM (replay/fakes)
+  - id: gate-3b-complexity-budget          # cyclomatic complexity <= 15 unless a reviewed waiver (pyproject.toml)
     name: python:3.13-slim
     entrypoint: bash
-    args: ["-c", ".venv/bin/python -m pytest -q"]
+    args: ["-c", ".venv/bin/python tools/complexity_budget.py"]
+    waitFor: [install]
+
+  - id: gate-4-tests-and-coverage          # unit/contract/component/property/architecture; branch-coverage ratchet
+    name: python:3.13-slim
+    entrypoint: bash
+    args: ["-c", ".venv/bin/python -m pytest -q -p no:cacheprovider --cov --cov-report=term"]
     waitFor: [install]
 
   - id: gate-5-groundedness-eval           # HARD GATE: uncited claims in approved/proposed outputs must be 0
     name: python:3.13-slim
     entrypoint: bash
     args: ["-c", ".venv/bin/python -m pytest -q tests/component -k groundedness"]
-    waitFor: [gate-4-unit-contract-component]
+    waitFor: [gate-4-tests-and-coverage]
 
   - id: gate-6-safety-suite                # HARD GATE: 0 unauthorized writes, 0 accepted forged/replayed tokens
     name: python:3.13-slim
     entrypoint: bash
     args: ["-c", ".venv/bin/python -m pytest -q tests -k 'safety or token'"]
-    waitFor: [gate-4-unit-contract-component]
+    waitFor: [gate-4-tests-and-coverage]
 
   - id: build-images                       # one image per container component (deploy/Dockerfile, ARG COMPONENT)
     name: gcr.io/cloud-builders/docker
@@ -67,7 +73,8 @@ steps:
           docker build -f deploy/Dockerfile --build-arg COMPONENT=$$c \
             -t ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_AR_REPO}/$$c:$SHORT_SHA . || exit 1
         done
-    waitFor: [gate-5-groundedness-eval, gate-6-safety-suite, gate-1-policy-lint, gate-2-pylint, gate-3-mypy-strict]
+    waitFor: [gate-5-groundedness-eval, gate-6-safety-suite, gate-1-policy-lint, gate-2-pylint, gate-3-mypy-strict,
+              gate-3b-complexity-budget]
 
   # Deploy stages (stage/prod) are added once Q-10 is resolved: push images, apply Terraform (Agent Gateway
   # policies in dry-run first), deploy Agent Runtime revisions, run online evals, then require manual approval.

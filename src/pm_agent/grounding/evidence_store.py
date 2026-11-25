@@ -16,9 +16,29 @@ _WORD = re.compile(r"[a-z0-9_]+")
 
 
 class EvidenceStore(Protocol):
+    """Read access the Verifier needs (V2 resolution)."""
+
     def get_chunk(self, evidence_id: str) -> EvidenceChunk | None: ...
 
     def get_signal(self, signal_id: str) -> Signal | None: ...
+
+
+class EvidenceRepository(EvidenceStore, Protocol):
+    """The full evidence port used by ingestion, workflows and correlation (AlloyDB adapter in production)."""
+
+    def add_signal(self, signal: Signal) -> None: ...
+
+    def add_chunk(self, chunk: EvidenceChunk) -> None: ...
+
+    def set_signal_status(self, signal_id: str, status: SignalStatus) -> None: ...
+
+    def list_signals(self, *, active_only: bool = False) -> list[Signal]: ...
+
+    def chunks_for(self, signal_id: str) -> list[EvidenceChunk]: ...
+
+    def find_signals(self, source_system: str, source_record_id: str) -> list[Signal]: ...
+
+    def search(self, query: str, top_k: int = 8) -> list[EvidenceChunk]: ...
 
 
 class InMemoryEvidenceStore:
@@ -44,6 +64,10 @@ class InMemoryEvidenceStore:
 
     def set_signal_status(self, signal_id: str, status: SignalStatus) -> None:
         self.signals[signal_id] = self.signals[signal_id].model_copy(update={"status": status})
+
+    def list_signals(self, *, active_only: bool = False) -> list[Signal]:
+        """Every stored signal in insertion order (only ``ACTIVE`` ones with *active_only*)."""
+        return [s for s in self.signals.values() if not active_only or s.status is SignalStatus.ACTIVE]
 
     def chunks_for(self, signal_id: str) -> list[EvidenceChunk]:
         return sorted((c for c in self.chunks.values() if c.signal_id == signal_id), key=lambda c: c.seq)

@@ -83,10 +83,7 @@ class LocalRedactor:
     def redact(self, text: str) -> RedactionResult:
         """Replace secrets irreversibly and PII with deterministic pseudonyms; return counts, never values."""
         findings: Counter[str] = Counter()
-        out = text
-        for name, pattern in self._secrets.items():
-            out, count = pattern.subn(f"[REDACTED:{name}]", out)
-            findings[name] += count
+        out = self._redact_secrets(text, findings)
         for name, pattern in self._pii.items():
             def _sub(match: re.Match[str], info_type: str = name) -> str:
                 if not _is_valid(info_type, match.group(0)):
@@ -95,6 +92,30 @@ class LocalRedactor:
                 return self.pseudonym(info_type, match.group(0))
             out = pattern.sub(_sub, out)
         return RedactionResult(text=out, findings={k: v for k, v in findings.items() if v})
+
+    def _redact_secrets(self, text: str, findings: Counter[str]) -> str:
+        """Every secret pattern runs on the *original* text and overlapping matches merge into one replacement.
+
+        Order-independent on purpose (docs/06 §5.2): applied one after another, ``pwd=`` could swallow a PEM's
+        ``-----BEGIN`` and leave the key body unredacted. ``[REDACTED:<TYPE>]`` is inserted as literal text — a
+        configured type name is never parsed as a ``re.sub`` template (``\\g<0>`` would echo the secret back).
+        """
+        spans: list[tuple[int, int, str]] = []
+        for name, pattern in self._secrets.items():
+            for match in pattern.finditer(text):
+                if match.end() > match.start():
+                    spans.append((match.start(), match.end(), name))
+                    findings[name] += 1
+        parts: list[str] = []
+        cursor = 0
+        for start, end, name in sorted(spans):
+            if start < cursor:  # overlaps the replacement just emitted: widen it
+                cursor = max(cursor, end)
+                continue
+            parts += [text[cursor:start], f"[REDACTED:{name}]"]
+            cursor = end
+        parts.append(text[cursor:])
+        return "".join(parts)
 
     def inspect(self, text: str) -> dict[str, int]:
         found: Counter[str] = Counter()

@@ -13,8 +13,8 @@ import threading
 from collections.abc import Sequence
 from typing import Any, NoReturn
 
-from pm_agent.correlation import CorrelationEngine, ProblemRepository
-from pm_agent.grounding.evidence_store import InMemoryEvidenceStore
+from pm_agent.correlation import CorrelationEngine, ProblemStore
+from pm_agent.grounding.evidence_store import EvidenceRepository
 from pm_agent.placeholders import not_implemented
 from pm_agent.schemas import Signal
 
@@ -22,7 +22,7 @@ LINKED_BY = "mcp-correlation"
 
 
 class EngineCorrelationService:
-    def __init__(self, engine: CorrelationEngine, evidence: InMemoryEvidenceStore, problems: ProblemRepository, *,
+    def __init__(self, engine: CorrelationEngine, evidence: EvidenceRepository, problems: ProblemStore, *,
                  subscription: str | None = None) -> None:
         self._engine = engine
         self._evidence = evidence
@@ -69,7 +69,7 @@ class EngineCorrelationService:
     def related(self, signal_id: str) -> dict[str, Any]:
         """Deterministic neighbourhood of a signal: parent, children, cross-references both ways, its problem."""
         signal = self._signal(signal_id)
-        signals = list(self._evidence.signals.values())
+        signals = self._evidence.list_signals()
         referenced = [other.signal_id for ref in signal.cross_refs
                       for other in self._evidence.find_signals(ref.system.value, ref.record_id)]
         referencing = [other.signal_id for other in signals if other.signal_id != signal_id and any(

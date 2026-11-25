@@ -14,7 +14,7 @@ from typing import Any
 
 from pm_agent.a2ui import surfaces as ui
 from pm_agent.correlation.aggregates import first_sentence
-from pm_agent.runtime import Services
+from pm_agent.ports import Services
 from pm_agent.schemas import (
     ActionType,
     CitedQuote,
@@ -44,28 +44,37 @@ def _timeline_claim(services: Services, signal: Signal) -> ClaimDraft | None:
                       citations=[CitedQuote(evidence_id=chunks[0].evidence_id, quote=sentence)])
 
 
+def _trigger_signal(services: Services, node_input: Any) -> Signal | None:
+    """The signal named by ``{"signal_id"}``, else the best lexical match for the request text."""
+    data = node_input if isinstance(node_input, dict) else {}
+    trigger = services.evidence.get_signal(str(data.get("signal_id") or ""))
+    if trigger is None:
+        hits = services.evidence.search(request_text(node_input), top_k=1)
+        trigger = services.evidence.get_signal(hits[0].signal_id) if hits else None
+    return trigger
+
+
+def _correlated_signals(services: Services, trigger: Signal) -> list[Signal]:
+    """Trigger + signals of every problem it hard-links to (and its own problem), oldest first, capped."""
+    problem_ids = {c.problem_id for c in services.correlation.hard_links(trigger, {})}
+    own_problem = services.problems.problem_for_signal(trigger.signal_id)
+    if own_problem:
+        problem_ids.add(own_problem)
+    related_ids = [s for pid in sorted(problem_ids) for s in services.problems.signal_ids(pid)
+                   if s != trigger.signal_id][:MAX_RELATED]
+    related = [s for s in (services.evidence.get_signal(i) for i in related_ids) if s]
+    return sorted([trigger, *related], key=lambda s: (s.captured_utc, s.signal_id))
+
+
 def build_investigate_issue(services: Services) -> Any:
     """W5 node: KB-first, correlated signals and a cited timeline assembled into an ``InvestigationPack``."""
     def investigate_issue(node_input: Any) -> dict[str, Any]:
-        data = node_input if isinstance(node_input, dict) else {}
-        text = request_text(node_input)
-        trigger = services.evidence.get_signal(str(data.get("signal_id") or ""))
-        if trigger is None:
-            hits = services.evidence.search(text, top_k=1)
-            trigger = services.evidence.get_signal(hits[0].signal_id) if hits else None
+        trigger = _trigger_signal(services, node_input)
         if trigger is None:
             return {"status": "no_evidence", "message": "No ingested signal matches this issue yet."}
         prior = [c.model_dump(mode="json") for c in services.near_duplicates.find(trigger.raw_text)
                  if c.system == "kb"]  # KB first (FR-C5)
-        hard = services.correlation.hard_links(trigger, {})
-        problem_ids = {c.problem_id for c in hard}
-        own_problem = services.problems.problem_for_signal(trigger.signal_id)
-        if own_problem:
-            problem_ids.add(own_problem)
-        related_ids = [s for pid in sorted(problem_ids) for s in services.problems.signal_ids(pid)
-                       if s != trigger.signal_id][:MAX_RELATED]
-        related = [services.evidence.get_signal(s) for s in related_ids]
-        signals = sorted([trigger, *[s for s in related if s]], key=lambda s: (s.captured_utc, s.signal_id))
+        signals = _correlated_signals(services, trigger)
         drafts = [d for d in (_timeline_claim(services, s) for s in signals) if d]
         checked = services.verifier.check_claims(drafts)
         pack = InvestigationPack(trigger_signal_id=trigger.signal_id,

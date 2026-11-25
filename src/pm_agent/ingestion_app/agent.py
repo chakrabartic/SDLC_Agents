@@ -3,6 +3,10 @@
 ``plan_window → poll_<source> ×N (parallel) → join_sources → dedup_signals → store_signals → problem_builder (W2)
 → emit_events``. Connectors return already-redacted ``Signal``s; a poll node only catches ``ConnectorError`` and
 reports the source as unavailable (IR3 — partial data is loud, never silently empty).
+
+Delta cursors and per-source health live in the ``IngestionState`` port and are committed by ``emit_events`` — i.e.
+only once the window is stored *and* linked. A failure anywhere re-polls the window; signals that were stored but
+never linked are fed to the problem builder again instead of being dropped as duplicates.
 """
 
 from __future__ import annotations
@@ -18,7 +22,7 @@ from pm_agent.connectors.base import ConnectorError, ConnectorStatus, SourceConn
 from pm_agent.grounding.chunking import chunk_signal
 from pm_agent.grounding.dedup import jaccard_minhash
 from pm_agent.placeholders import PlaceholderNotImplemented
-from pm_agent.runtime import Services
+from pm_agent.ports import Services
 from pm_agent.schemas import Signal, SourceSystem
 from pm_agent.settings import ConfigurationError
 from pm_agent.workflows.problem_builder import build_problem_builder
@@ -47,15 +51,21 @@ def build_ingestion_workflow(services: Services, provider: ModelProvider) -> Wor
     """The W1 graph over every configured connector (fan-out + ``JoinNode``)."""
     llm = LlmNodes(provider)
     threshold = services.settings.correlation.signal_minhash_jaccard
-    cursors: dict[str, str | None] = {}
+    state = services.ingestion
 
     def plan_window(node_input: Any) -> dict[str, Any]:
         del node_input
-        return {"cursors": dict(cursors), "sources": sorted(s.value for s in services.connectors)}
+        sources = sorted(s.value for s in services.connectors)
+        return {"cursors": {source: state.cursor(source) for source in sources}, "sources": sources}
+
+    def _already_ingested(signal: Signal) -> bool:
+        """Stored *and* linked; a stored-but-unlinked signal (a window that failed later) is processed again."""
+        return (services.evidence.get_signal(signal.signal_id) is not None
+                and services.problems.problem_for_signal(signal.signal_id) is not None)
 
     def dedup_signals(node_input: dict[str, Any]) -> dict[str, Any]:
         """Exact duplicates (same provenance) are dropped; cross-system near-duplicates become twins."""
-        health, unique, seen = {}, [], set()
+        health, cursors, unique, seen = {}, {}, [], set()
         dropped = 0
         for output in node_input.values():
             health[output["source"]] = output["status"]
@@ -64,7 +74,7 @@ def build_ingestion_workflow(services: Services, provider: ModelProvider) -> Wor
             for data in output["signals"]:
                 signal = Signal.model_validate(data)
                 key = signal.provenance_hash
-                if key in seen or services.evidence.get_signal(signal.signal_id) is not None:
+                if key in seen or _already_ingested(signal):
                     dropped += 1
                     continue
                 seen.add(key)
@@ -78,7 +88,7 @@ def build_ingestion_workflow(services: Services, provider: ModelProvider) -> Wor
                     twins[signal.signal_id] = earlier.signal_id
                     break
         return {"signals": [s.model_dump(mode="json") for s in ordered], "twins": twins, "dropped": dropped,
-                "source_health": health}
+                "source_health": health, "cursors": cursors}
 
     def store_signals(node_input: dict[str, Any]) -> dict[str, Any]:
         stored = []
@@ -90,11 +100,13 @@ def build_ingestion_workflow(services: Services, provider: ModelProvider) -> Wor
             stored.append(signal.signal_id)
         return {"signal_ids": stored, "twins": node_input["twins"],
                 "summary": {"stored": len(stored), "dropped": node_input["dropped"],
-                            "source_health": node_input["source_health"]}}
+                            "source_health": node_input["source_health"], "cursors": node_input["cursors"]}}
 
     def emit_events(node_input: dict[str, Any]) -> dict[str, Any]:
-        """Summary for operators (production: Pub/Sub ``signal-ingested`` + adjudication queue)."""
-        return {**(node_input.get("summary") or {}), "problems": node_input.get("problems", []),
+        """Commit the completed window, then summarise for operators (production: Pub/Sub ``signal-ingested``)."""
+        summary = dict(node_input.get("summary") or {})
+        state.commit_window(cursors=summary.pop("cursors", {}), health=summary.get("source_health", {}))
+        return {**summary, "problems": node_input.get("problems", []),
                 "needs_confirmation": node_input.get("needs_confirmation", [])}
 
     polls = tuple(_poller(source, connector) for source, connector in sorted(services.connectors.items()))

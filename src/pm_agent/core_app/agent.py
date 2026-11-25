@@ -19,7 +19,7 @@ from google.adk.workflow import node
 
 from pm_agent.agents.factory import NODE_SPECS, LlmNodes, ModelProvider
 from pm_agent.grounding.plugin import DeniedToolCall, GroundingGuardPlugin
-from pm_agent.runtime import Services
+from pm_agent.ports import Services
 from pm_agent.schemas import Actor, LedgerEntryType
 from pm_agent.workflows.ask import build_ask, build_review_problems
 from pm_agent.workflows.common import find_problem_id, request_text

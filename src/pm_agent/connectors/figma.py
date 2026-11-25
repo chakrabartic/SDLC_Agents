@@ -172,12 +172,24 @@ class FigmaApi:
                            headers={"Content-Type": "application/json"}, json_body=body)
 
 
+def _redact_json(value: Any, redactor: Redactor) -> Any:
+    """Recursively redact every string leaf in a Figma node tree so text layers cannot leak secrets/PII (DM-5)."""
+    if isinstance(value, str):
+        return redactor.redact(value).text
+    if isinstance(value, Mapping):
+        return {k: _redact_json(v, redactor) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_redact_json(item, redactor) for item in value]
+    return value
+
+
 class FixtureFigmaConnector(FixtureConnectorBase):
     """DLS library + prototype comments over synthetic Figma JSON (``tests/fixtures/connectors/figma``)."""
 
     def __init__(self, redactor: Redactor, *, path: Path | None = None, run_id: str = "fixture") -> None:
         data = json.loads((path or default_fixture_root() / "figma" / "library.json").read_text(encoding="utf-8"))
         ctx = IngestContext(connector="fixture-figma", run_id=run_id)
+        self._redactor = redactor
         self._components = [normalize_figma_component(c) for c in data["components"]["meta"]["components"]]
         self._sets = [normalize_figma_component(c, kind="component_set")
                       for c in data["component_sets"]["meta"]["component_sets"]]
@@ -205,8 +217,9 @@ class FixtureFigmaConnector(FixtureConnectorBase):
     def file_nodes(self, file_key: str, ids: Sequence[str]) -> dict[str, Any]:
         del file_key
         nodes = self._nodes.get("nodes") or {}
-        return {"name": self._nodes.get("name"), "lastModified": self._nodes.get("lastModified"),
-                "version": self._nodes.get("version"), "nodes": {i: nodes[i] for i in ids if i in nodes}}
+        payload = {"name": self._nodes.get("name"), "lastModified": self._nodes.get("lastModified"),
+                   "version": self._nodes.get("version"), "nodes": {i: nodes[i] for i in ids if i in nodes}}
+        return dict(_redact_json(payload, self._redactor))
 
     def render_images(self, file_key: str, ids: Sequence[str], *, fmt: str = "png", scale: float = 2
                       ) -> dict[str, str]:
@@ -273,7 +286,7 @@ class HttpFigmaConnector:
         return normalize_figma_component(meta) if isinstance(meta, Mapping) else None
 
     def file_nodes(self, file_key: str, ids: Sequence[str]) -> dict[str, Any]:
-        return dict(self._send(self._api.file_nodes(file_key, ids)))
+        return dict(_redact_json(dict(self._send(self._api.file_nodes(file_key, ids))), self._redactor))
 
     def render_images(self, file_key: str, ids: Sequence[str], *, fmt: str = "png", scale: float = 2
                       ) -> dict[str, str]:

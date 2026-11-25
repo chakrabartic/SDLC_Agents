@@ -59,45 +59,61 @@ async def evaluate() -> dict[str, Any]:
     redactor = LocalRedactor.from_settings(settings, pseudonym_key=b"eval-offline")
     services = build_local_services(settings, connectors=golden_connectors(redactor))
     provider = ExtractiveModelProvider()
+    await _ingest(services, provider)
+    problems = services.problems.list_problems()
+    manifest = load_golden_manifest()
+    proposed = await _draft_biggest_problem(services, provider, problems)
+    report = {"E1": _problem_formation(services, problems, manifest),
+              "E3": _groundedness(services, problems, proposed),
+              "E7": _redaction(services, manifest)}
+    report["hard_gates_pass"] = (report["E3"]["uncited_claims"] == 0 and report["E7"]["secrets_in_store"] == 0
+                                 and not report["E7"]["seeded_markers_leaked"])
+    return report
 
+
+async def _ingest(services: Any, provider: Any) -> None:
+    """W1 + W2 over the synthetic golden connectors."""
     ingestion = build_ingestion_app(services, provider)
     sessions = InMemorySessionService()
     runner = Runner(app=ingestion, session_service=sessions)
     session = await sessions.create_session(app_name=ingestion.name, user_id="eval")
     await _run(runner, "eval", session.id, types.Content(role="user", parts=[types.Part(text="ingest")]))
 
-    problems = services.problems.list_problems()
-    systems_per_problem = [len({services.evidence.get_signal(link.signal_id).source_system  # type: ignore[union-attr]
-                                for link in p.linked_signals}) for p in problems]
-    manifest = load_golden_manifest()
-    clustering = _pairwise(manifest, {(s.source_system.value, s.source_record_id): p.problem_id for p in problems
-                                      for s in (services.evidence.get_signal(link.signal_id)
-                                                for link in p.linked_signals) if s is not None})
+
+def _problem_formation(services: Any, problems: list[Any], manifest: dict[str, Any]) -> dict[str, Any]:
+    """E1: clustering quality against the golden manifest and the AC1 multi-source criterion."""
+    signals_of = {p.problem_id: [s for s in (services.evidence.get_signal(link.signal_id) for link in p.linked_signals)
+                                 if s is not None] for p in problems}
+    systems_per_problem = [len({s.source_system for s in signals}) for signals in signals_of.values()]
+    clustering = _pairwise(manifest, {(s.source_system.value, s.source_record_id): pid
+                                      for pid, signals in signals_of.items() for s in signals})
+    return {"problems": len(problems), "expected_problems": len(manifest["problems"]) + 1, **clustering,
+            "max_source_systems_in_one_problem": max(systems_per_problem, default=0),
+            "ac1_multi_source_problem": max(systems_per_problem, default=0) >= 3}
+
+
+def _groundedness(services: Any, problems: list[Any], proposed: dict[str, Any]) -> dict[str, Any]:
+    """E3 (hard gate): no citation-required claim without a citation, anywhere."""
     uncited = sum(1 for p in problems for _, c in iter_claims(p) if c.kind in CITATION_REQUIRED and not c.citations)
     failing = sum(1 for p in problems
                   if services.verifier.verify_subject(p, subject_type="product_problem").overall.value != "PASS")
-    leaks = {}
-    for signal in services.evidence.signals.values():
+    return {"uncited_claims": uncited + proposed.get("uncited_claims", 0), "problems_failing_verification": failing,
+            "requirement": proposed}
+
+
+def _redaction(services: Any, manifest: dict[str, Any]) -> dict[str, Any]:
+    """E7 (hard gate): nothing secret or raw-PII in the store, and no seeded marker survived."""
+    leaks: dict[str, int] = {}
+    stored = services.evidence.list_signals()
+    for signal in stored:
         for info_type, count in services.redactor.inspect(signal.raw_text).items():
             leaks[info_type] = leaks.get(info_type, 0) + count
-
-    stored_text = "\n".join(signal.raw_text for signal in services.evidence.signals.values())
+    stored_text = "\n".join(signal.raw_text for signal in stored)
     markers = [x["raw_marker"] for x in manifest.get("secrets", [])] + list(manifest.get("raw_pii_markers", []))
-    proposed = await _draft_biggest_problem(services, provider, problems)
     secret_types = getattr(services.redactor, "secret_types", SECRET_TYPES)
-    report = {
-        "E1": {"problems": len(problems), "expected_problems": len(manifest["problems"]) + 1, **clustering,
-               "max_source_systems_in_one_problem": max(systems_per_problem, default=0),
-               "ac1_multi_source_problem": max(systems_per_problem, default=0) >= 3},
-        "E3": {"uncited_claims": uncited + proposed.get("uncited_claims", 0), "problems_failing_verification": failing,
-               "requirement": proposed},
-        "E7": {"secrets_in_store": sum(v for k, v in leaks.items() if k in secret_types),
-               "raw_pii_in_store": sum(leaks.get(k, 0) for k in ("EMAIL_ADDRESS", "PHONE_NUMBER")),
-               "seeded_markers_leaked": [m for m in markers if m in stored_text]},
-    }
-    report["hard_gates_pass"] = (report["E3"]["uncited_claims"] == 0 and report["E7"]["secrets_in_store"] == 0
-                                 and not report["E7"]["seeded_markers_leaked"])
-    return report
+    return {"secrets_in_store": sum(v for k, v in leaks.items() if k in secret_types),
+            "raw_pii_in_store": sum(leaks.get(k, 0) for k in ("EMAIL_ADDRESS", "PHONE_NUMBER")),
+            "seeded_markers_leaked": [m for m in markers if m in stored_text]}
 
 
 def _pairwise(manifest: dict[str, Any], predicted: dict[tuple[str, str], str]) -> dict[str, Any]:

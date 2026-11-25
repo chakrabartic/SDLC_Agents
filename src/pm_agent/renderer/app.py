@@ -4,8 +4,9 @@
 * ``GET /programs/{id}`` — the compiled Plugin API program, fetched by the private SLB Figma plugin. Plugin
   authentication is a placeholder until the org plugin and its auth model are confirmed (Q-02); while the token is a
   placeholder every download is refused.
-Local/dev wiring comes from ``runtime.build_services``; stage/prod need a spec-store client (``mcp-store``) and fail
-loudly until it exists (Q-10).
+
+``create_app`` is a pure factory: the composition root (``pm_agent.runtime.renderer_app``) supplies the backend and
+write server for the current environment, so this package never depends on the composition root (ADR-011).
 """
 
 from __future__ import annotations
@@ -19,6 +20,8 @@ from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import PlainTextResponse
 from starlette.applications import Starlette
 
+from pm_agent.mcp_servers.factory import build_server, http_app
+from pm_agent.mcp_servers.services import ServerServices
 from pm_agent.mcp_servers.write_server import WriteToolServer
 from pm_agent.placeholders import is_placeholder, placeholder
 from pm_agent.renderer.backend import RendererBackend
@@ -28,27 +31,16 @@ PLUGIN_TOKEN_ENV = "PM_AGENT_RENDERER_PLUGIN_TOKEN"
 SERVER = "svc-prototype-renderer"
 
 
-def create_app(settings: Settings | None = None, backend: RendererBackend | None = None,
-               plugin_token: str | None = None) -> FastAPI:
-    """Renderer service; with no *backend* it wires itself from the environment's composition root."""
+def create_app(backend: RendererBackend, *, settings: Settings | None = None,
+               write_server: WriteToolServer | None = None, plugin_token: str | None = None) -> FastAPI:
+    """Health + token-gated program download; mounts the MCP write tool when a *write_server* is supplied."""
     token = plugin_token or os.environ.get(PLUGIN_TOKEN_ENV) or placeholder("Q-02", "figma_plugin_token")
-    write_server: WriteToolServer | None = None
-    if backend is None:
-        from pm_agent.runtime import build_services  # pylint: disable=import-outside-toplevel
-
-        services = build_services(settings)
-        found = services.write_backends.get(SERVER)
-        if not isinstance(found, RendererBackend):
-            raise RuntimeError("the renderer backend is not wired in this environment")
-        backend, write_server = found, services.write_servers.get(SERVER)
-        settings = services.settings
     mcp_app: Starlette | None = None
-    if write_server is not None and settings is not None:
-        from pm_agent.mcp_servers.factory import build_server, http_app  # pylint: disable=import-outside-toplevel
-        from pm_agent.mcp_servers.services import ServerServices  # pylint: disable=import-outside-toplevel
-
-        services_view = ServerServices(settings=settings, write_servers={SERVER: write_server})
-        mcp_app = http_app(build_server(SERVER, services_view))
+    if write_server is not None:
+        if settings is None:
+            raise ValueError("mounting the MCP write tool needs the environment's settings")
+        server_services = ServerServices(settings=settings, write_servers={SERVER: write_server})
+        mcp_app = http_app(build_server(SERVER, server_services))
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:

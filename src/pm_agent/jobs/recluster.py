@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from pm_agent.correlation import CorrelationEngine, ProblemRepository
-from pm_agent.correlation.scoring import LexicalScorer
+from pm_agent.correlation.scoring import SimilarityScorer, make_scorer
 from pm_agent.grounding.atoms import AtomExtractor
 from pm_agent.grounding.evidence_store import InMemoryEvidenceStore
 from pm_agent.jobs import emit
@@ -19,14 +19,19 @@ from pm_agent.schemas import LinkType
 from pm_agent.settings import Settings, load_settings
 
 
-def proposals(settings: Settings, store: InMemoryEvidenceStore, problems: ProblemRepository) -> list[dict[str, Any]]:
-    """For every provisional link, the problem the signal now fits best (only when it differs)."""
-    scorer = LexicalScorer(settings, AtomExtractor.from_settings(settings))
-    engine = CorrelationEngine(settings, store, problems, scorer)
+def proposals(settings: Settings, store: InMemoryEvidenceStore, problems: ProblemRepository, *,
+              scorer: SimilarityScorer | None = None) -> list[dict[str, Any]]:
+    """For every provisional link, the problem the signal now fits best (only when it differs).
+
+    Uses the configured scorer (``make_scorer``) and *that* scorer's ``assign_threshold`` so embedding and lexical
+    scores are never compared against the wrong cut-off.
+    """
+    active_scorer = scorer if scorer is not None else make_scorer(settings, AtomExtractor.from_settings(settings))
+    engine = CorrelationEngine(settings, store, problems, active_scorer)
     found = []
     for problem in problems.list_problems():
         for link in problem.linked_signals:
-            if link.link_type is not LinkType.SEMANTIC or link.score >= settings.correlation.lexical_assign_threshold:
+            if link.link_type is not LinkType.SEMANTIC or link.score >= active_scorer.assign_threshold:
                 continue
             signal = store.get_signal(link.signal_id)
             if signal is None:

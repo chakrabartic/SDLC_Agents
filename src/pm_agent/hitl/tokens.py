@@ -3,12 +3,12 @@
 Minted only by ``mcp-ledger`` (Cloud KMS key; no other identity holds ``cloudkms.signer``) and verified twice: by
 ``commit-executor`` and again by the write MCP server. Verification is strict: algorithm pinned to ES256 (no
 ``none``/HMAC confusion), key looked up by ``kid``, then issuer, audience, expiry, scope (the exact tool), action id
-and the payload hash (``pah`` = RFC 8785 hash of exactly what the PM approved).
+and the payload hash (``pah`` = RFC 8785 hash of exactly what the PM approved). Segments must be canonical base64url
+(``crypto.b64url_decode``), so no two strings verify as the same token.
 """
 
 from __future__ import annotations
 
-import binascii
 import json
 import time
 from collections.abc import Mapping
@@ -20,6 +20,7 @@ from pm_agent.crypto import Signer, b64url_decode, b64url_encode, verify_es256
 from pm_agent.schemas import ApprovalTokenClaims, canonical_json, content_sha256
 
 ALGORITHM = "ES256"
+MAX_TOKEN_CHARS = 8192
 
 
 class TokenError(Exception):
@@ -39,6 +40,13 @@ def mint_token(claims: ApprovalTokenClaims, signer: Signer) -> str:
 
 
 def _parts(token: str) -> tuple[dict[str, Any], bytes, bytes, bytes]:
+    """Split and decode a compact JWS. Hostile input of any shape fails as ``malformed`` — never another exception.
+
+    Real tokens are well under 2 KiB; the size cap and the ``RecursionError`` guard keep a hostile header from
+    exhausting the JSON decoder before the signature is even looked at.
+    """
+    if len(token) > MAX_TOKEN_CHARS:
+        raise TokenError("malformed", f"longer than {MAX_TOKEN_CHARS} characters")
     pieces = token.split(".")
     if len(pieces) != 3:
         raise TokenError("malformed", "expected three dot-separated parts")
@@ -46,7 +54,7 @@ def _parts(token: str) -> tuple[dict[str, Any], bytes, bytes, bytes]:
         header = json.loads(b64url_decode(pieces[0]))
         body = b64url_decode(pieces[1])
         signature = b64url_decode(pieces[2])
-    except (ValueError, binascii.Error) as exc:
+    except (ValueError, RecursionError) as exc:  # binascii.Error, UnicodeDecodeError, JSONDecodeError are ValueErrors
         raise TokenError("malformed", "undecodable part") from exc
     if not isinstance(header, dict):
         raise TokenError("malformed", "header is not an object")

@@ -10,33 +10,33 @@ from __future__ import annotations
 from typing import Any
 
 from pm_agent.connectors.recording import RecordingWriteBackend
-from pm_agent.gateway import ToolCallError
-from pm_agent.grounding.verifier import subject_digest
-from pm_agent.hitl.subjects import InMemorySubjectStore
-from pm_agent.mcp_servers.write_server import WriteHandler
+from pm_agent.gateway import ToolCallError, WriteHandler
+from pm_agent.hitl.subjects import SubjectStore
 from pm_agent.prototype.compile import compile_plugin_program
 from pm_agent.schemas import PrototypeSpec, RequirementDraft, sha256_hex
+from pm_agent.schemas.subjects import subject_digest
 
 
 class RendererBackend(RecordingWriteBackend):
-    def __init__(self, subjects: InMemorySubjectStore, base_url: str = "https://renderer.example.invalid") -> None:
+    def __init__(self, subjects: SubjectStore, base_url: str = "https://renderer.example.invalid") -> None:
         super().__init__(system="svc-prototype-renderer")
         self._subjects = subjects
         self._base_url = base_url.rstrip("/")
         self.programs: dict[str, str] = {}
 
     def _load(self, payload: dict[str, Any]) -> tuple[PrototypeSpec, dict[str, str]]:
-        spec_ref = f"prototype_spec:{payload.get('spec_id')}:v1"
-        try:
-            _, spec = self._subjects.get(spec_ref)
-        except LookupError as exc:
-            raise ToolCallError("not_found", "approved prototype spec not found") from exc
-        if not isinstance(spec, PrototypeSpec) or subject_digest(spec) != payload.get("spec_sha256"):
+        """The approved spec version (matched by content hash, not by an assumed version) and its verified claims."""
+        versions = [s for s in self._subjects.versions("prototype_spec", str(payload.get("spec_id")))
+                    if isinstance(s, PrototypeSpec)]
+        if not versions:
+            raise ToolCallError("not_found", "approved prototype spec not found")
+        spec = next((s for s in versions if subject_digest(s) == payload.get("spec_sha256")), None)
+        if spec is None:
             raise ToolCallError("validation_failed", "stored spec differs from the approved spec")
         claims: dict[str, str] = {}
-        for _, subject in self._subjects.items.values():
-            if isinstance(subject, RequirementDraft) and subject.requirement_id == spec.requirement_id:
-                claims.update({c.claim_id: c.text for c in subject.all_claims()})
+        for draft in self._subjects.versions("requirement_draft", spec.requirement_id):
+            if isinstance(draft, RequirementDraft):
+                claims.update({c.claim_id: c.text for c in draft.all_claims()})
         return spec, claims
 
     def handler(self, tool: str) -> WriteHandler:

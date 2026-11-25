@@ -14,7 +14,6 @@ from typing import Any
 from pydantic import BaseModel
 
 from pm_agent.a2ui._ui import label
-from pm_agent.grounding.verifier import iter_claims
 from pm_agent.schemas import (
     Citation,
     Claim,
@@ -30,6 +29,7 @@ from pm_agent.schemas import (
     SpecNode,
     TraceLink,
 )
+from pm_agent.schemas.subjects import iter_claims
 
 Section = dict[str, Any]
 Row = dict[str, str | int | float | bool | None]

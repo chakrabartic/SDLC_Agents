@@ -17,12 +17,10 @@ from pydantic import BaseModel
 from pm_agent.a2ui import surfaces as ui
 from pm_agent.agents.factory import LlmNodes
 from pm_agent.agents.llm_schemas import PrototypeOut, SpecNodeOut, to_claim_drafts
-from pm_agent.grounding.verifier import subject_digest
 from pm_agent.prototype.dls import DlsCatalog, load_dls_catalog
-from pm_agent.runtime import Services
+from pm_agent.ports import Services
 from pm_agent.schemas import (
     ActionType,
-    Actor,
     Claim,
     LedgerEntryType,
     NewPattern,
@@ -30,11 +28,11 @@ from pm_agent.schemas import (
     PrototypeSpec,
     RequirementDraft,
     SpecNode,
-    SubjectRef,
     new_id,
 )
+from pm_agent.schemas.subjects import subject_digest
 from pm_agent.workflows.approval import build_approval_nodes
-from pm_agent.workflows.common import dump_blocked, find_problem_id, problem_pack, request_text
+from pm_agent.workflows.common import dump_blocked, find_problem_id, problem_pack, request_text, save_draft
 
 FIGMA = ActionType.FIGMA_RENDER_PROTOTYPE.value
 PROTOTYPE_FIELDS = ("summary", "user_workflow", "desired_outcome", "in_scope", "acceptance_criteria", "edge_cases")
@@ -115,11 +113,7 @@ def build_design_prototype(services: Services, llm: LlmNodes) -> Any:
                              screens=[PrototypeScreen(name=s.name, width=s.width, height=s.height,
                                                       nodes=_tree(s.nodes, claim_ids)) for s in raw.screens],
                              new_patterns=patterns)
-        ref = services.subjects.put("prototype_spec", spec)
-        services.ledger.record(LedgerEntryType.DRAFT_SAVED, actor=Actor(type="agent", id=services.agent_id),
-                               subject_refs=[SubjectRef(type="prototype_spec", id=spec.spec_id,
-                                                        sha256=subject_digest(spec))],
-                               payload={"draft_ref": ref, "requirement_id": spec.requirement_id})
+        ref = save_draft(services, "prototype_spec", spec, payload={"requirement_id": spec.requirement_id})
         return {"spec_ref": ref, "reuse_ratio": spec.reuse_ratio, "blocked": dump_blocked(blocked),
                 "unknown_keys": sorted(set(spec.component_keys()) - catalog.keys)}
 
@@ -159,9 +153,7 @@ def build_design_prototype(services: Services, llm: LlmNodes) -> Any:
                 feedback.append(f"component keys not in the DLS catalog: {built['unknown_keys']}")
         else:
             return {"status": "needs_input", "problems": feedback, "spec_ref": verified.get("subject_ref")}
-        proposal = await ctx.run_node(tail.propose, verified)
-        await ctx.run_node(tail.await_approval, proposal)
-        outcome = await ctx.run_node(tail.commit, proposal)
+        outcome = await tail.run(ctx, verified)
         return {**outcome, "problem_id": guard["problem_id"], "spec_ref": verified["subject_ref"]}
 
     def _pack(node_input: dict[str, Any]) -> dict[str, Any]:

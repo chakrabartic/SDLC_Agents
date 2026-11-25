@@ -33,8 +33,8 @@
 | Q-04 | ADO process template: org/project, work-item types, fields, area paths | `ado_webhook_basic_username` | `deploy/k8s/README.md`<br/>`infra/terraform/modules/platform/main.tf`<br/>`src/pm_agent/event_gateway/secrets.py` |
 | Q-04 | ADO process template: org/project, work-item types, fields, area paths | `ado_webhook_shared_secret` | `deploy/k8s/README.md`<br/>`infra/terraform/modules/platform/main.tf`<br/>`src/pm_agent/event_gateway/secrets.py` |
 | Q-04 | ADO process template: org/project, work-item types, fields, area paths | `ado_write_credentials` | `src/pm_agent/mcp_servers/write_handlers.py` |
-| Q-04 | ADO process template: org/project, work-item types, fields, area paths | `code path: ado organization/project in scope` | `src/pm_agent/connectors/ado.py` |
 | Q-05 | ServiceNow instance, tables and integration user | `code path: servicenow instance url and integration user` | `src/pm_agent/connectors/servicenow.py` |
+| Q-05 | ServiceNow instance, tables and integration user | `host` | `src/pm_agent/placeholders.py` |
 | Q-05 | ServiceNow instance, tables and integration user | `servicenow_instance_url` | `config/pm_agent.yaml` |
 | Q-05 | ServiceNow instance, tables and integration user | `servicenow_oauth_client` | `src/pm_agent/connectors/servicenow.py` |
 | Q-05 | ServiceNow instance, tables and integration user | `servicenow_webhook_hmac_secret` | `deploy/k8s/README.md`<br/>`infra/terraform/modules/platform/main.tf`<br/>`src/pm_agent/event_gateway/secrets.py` |
@@ -59,6 +59,7 @@
 | Q-10 | GCP organization ID and stage/prod projects | `code path: Pub/Sub pull subscription {self.subscription!r} for signal-ingested events` | `src/pm_agent/mcp_servers/correlation.py` |
 | Q-10 | GCP organization ID and stage/prod projects | `code path: SDP de-identification key material (KMS-wrapped key) for connector redaction` | `src/pm_agent/serve.py` |
 | Q-10 | GCP organization ID and stage/prod projects | `code path: approval-token-signer KMS key version (PM_AGENT_APPROVAL_KEY)` | `src/pm_agent/serve.py` |
+| Q-10 | GCP organization ID and stage/prod projects | `code path: durable jti registry (Memorystore SET NX / AlloyDB hitl.token_executions) ` | `src/pm_agent/serve.py` |
 | Q-10 | GCP organization ID and stage/prod projects | `code path: google-cloud-pubsub publisher not installed in this image` | `src/pm_agent/event_gateway/hints.py` |
 | Q-10 | GCP organization ID and stage/prod projects | `code path: signal_change_hints_topic` | `src/pm_agent/event_gateway/hints.py` |
 | Q-10 | GCP organization ID and stage/prod projects | `code path: stage/prod adapters for {component}: Cloud KMS signers, AlloyDB ledger/stores, ` | `src/pm_agent/serve.py` |
@@ -95,4 +96,4 @@
 | Q-14 | Internal outreach shared mailbox | `code path: outreach shared mailbox for send_mail` | `src/pm_agent/mcp_servers/write_handlers.py` |
 | Q-14 | Internal outreach shared mailbox | `outreach_shared_mailbox` | `config/pm_agent.yaml` |
 
-**85 placeholders across 13 open questions.**
+**86 placeholders across 13 open questions.**

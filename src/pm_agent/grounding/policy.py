@@ -5,13 +5,30 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
+from email.utils import getaddresses
 from typing import Any
 
 from pm_agent.schemas import ActionType
 from pm_agent.settings import Settings
 
-_EMAIL_DOMAIN = re.compile(r"@([A-Za-z0-9.-]+)$")
+_DOMAIN = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+")
 POLICY_VERSION = "policy-1"
+
+
+def _recipient_domain(recipient: str) -> str | None:
+    """Extract the RFC 5322 domain of a single recipient, rejecting CR/LF, multi-address, double-@ and %-hack forms."""
+    if "\r" in recipient or "\n" in recipient:
+        return None
+    parsed = getaddresses([recipient])
+    if len(parsed) != 1:
+        return None
+    address = parsed[0][1].strip()
+    if address.count("@") != 1:
+        return None
+    local, _, domain = address.partition("@")
+    if not local or "%" in local or not _DOMAIN.fullmatch(domain):
+        return None
+    return domain.lower()
 
 # Which verified subject may back which write (assess-before-mutation: an approval for a KB article can never be
 # replayed as an ADO work item). Consumed by V9 and the HITL action catalog.
@@ -73,9 +90,8 @@ class PolicyEngine:
         if not recipients:
             decision.deny("P-03", "outreach without recipients")
         for recipient in recipients:
-            match = _EMAIL_DOMAIN.search(recipient.strip())
-            domain = match.group(1).lower() if match else ""
-            if not any(domain == d or domain.endswith("." + d) for d in allowed):
+            domain = _recipient_domain(recipient)
+            if domain is None or not any(domain == d or domain.endswith("." + d) for d in allowed):
                 decision.deny("P-03", f"recipient domain '{domain or recipient}' is external (GOV5)")
 
     def _kb_audience(self, payload: dict[str, Any], decision: PolicyDecision) -> None:

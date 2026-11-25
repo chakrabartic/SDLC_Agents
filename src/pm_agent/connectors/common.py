@@ -34,9 +34,10 @@ _BLOCK_TAGS = frozenset({
 })
 _SKIP_TAGS = frozenset({"head", "script", "style", "title"})
 _SPACES = re.compile(r"[ \t\f\v\u00a0]+")
-_SNOW_DATETIME = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
-_ISO_FRACTION = re.compile(r"^(?P<head>.+T\d{2}:\d{2}:\d{2})\.(?P<frac>\d+)(?P<tail>.*)$")
-_CURSOR = re.compile(r"^fx:(\d{1,9})$")
+# ``fullmatch`` over ASCII classes: ``$`` also matches before a trailing newline and ``\d`` matches any Unicode digit.
+_SNOW_DATETIME = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}")
+_ISO_FRACTION = re.compile(r"(?P<head>.+T[0-9]{2}:[0-9]{2}:[0-9]{2})\.(?P<frac>[0-9]+)(?P<tail>.*)")
+_CURSOR = re.compile(r"fx:([0-9]{1,9})")
 _WORD = re.compile(r"[a-z0-9_]+")
 
 
@@ -144,20 +145,25 @@ def person_ref(redactor: Redactor, identity: str | None, *, role_hint: str | Non
 
 # -------------------------------------------------------------------------------------------- timestamps
 def parse_utc(value: object) -> datetime | None:
-    """ISO 8601 (``Z``/offsets, 7-digit ADO fractions) or ServiceNow ``YYYY-MM-DD HH:MM:SS`` (UTC) → aware UTC."""
+    """ISO 8601 (``Z``/offsets, 7-digit ADO fractions) or ServiceNow ``YYYY-MM-DD HH:MM:SS`` (UTC) → aware UTC.
+
+    ``None`` for anything else — including strings *shaped* like a timestamp that name no real instant
+    (``2026-02-30 10:00:00``) or that leave the representable range when converted to UTC
+    (``9999-12-31T23:59:59-23:59``). Never raises: cursors reach this function straight from MCP clients.
+    """
     if not isinstance(value, str) or not value.strip():
         return None
     text = value.strip()
-    if _SNOW_DATETIME.match(text):
-        return datetime.strptime(text, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
-    match = _ISO_FRACTION.match(text)
-    if match:
-        text = f"{match.group('head')}.{match.group('frac')[:6]}{match.group('tail')}"
     try:
+        if _SNOW_DATETIME.fullmatch(text):
+            return datetime.strptime(text, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
+        match = _ISO_FRACTION.fullmatch(text)
+        if match:
+            text = f"{match.group('head')}.{match.group('frac')[:6]}{match.group('tail')}"
         parsed = datetime.fromisoformat(text)
-    except ValueError:
+        return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
+    except (ValueError, OverflowError):
         return None
-    return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
 
 
 def require_timestamp(cursor: str) -> str:
@@ -183,7 +189,7 @@ def decode_offset_cursor(cursor: str | None) -> int:
     """Offset of an ``fx:<n>`` cursor (``None`` = start); anything else is a typed ``validation_failed``."""
     if cursor is None or cursor == "":
         return 0
-    match = _CURSOR.match(cursor)
+    match = _CURSOR.fullmatch(cursor)
     if match is None:
         raise ConnectorError("validation_failed", "unrecognized cursor")
     return int(match.group(1))

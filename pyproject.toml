@@ -32,6 +32,9 @@ dev = [
   "pytest>=8",
   "pytest-asyncio>=0.24",
   "pytest-mock>=3.14",
+  "pytest-cov>=6",                 # branch-coverage gate (make check / Cloud Build gate 4)
+  "hypothesis>=6.100",             # property-based tests over invariants (tests/property)
+  "radon>=6.0",                    # cyclomatic complexity budget (tools/complexity_budget.py)
   "pylint>=3.3",
   "mypy>=1.13",
   "types-PyYAML",
@@ -56,11 +59,23 @@ addopts = "-q --strict-markers"
 markers = [
   "contract: wire-format / interface contract tests (no network)",
   "component: ADK workflow tests with fakes (no network, no LLM)",
+  "architecture: layering / import-closure fitness tests (ADR-003, ADR-011)",
+  "property: property-based tests (hypothesis) over invariants",
 ]
 filterwarnings = [
   "ignore::DeprecationWarning",
   "ignore::UserWarning",
 ]
+
+# ----------------------------------------------------------------- coverage (gate 4: make check / Cloud Build)
+[tool.coverage.run]
+branch = true
+source = ["pm_agent"]
+
+[tool.coverage.report]
+fail_under = 89            # ratchet: raise with every meaningful gain, never lower (baseline 86 on 2026-11-24)
+show_missing = true
+skip_covered = true
 
 # ----------------------------------------------------------------- mypy
 [tool.mypy]
@@ -113,3 +128,13 @@ no-docstring-rgx = "^_"
 
 [tool.pylint.format]
 max-line-length = 120
+
+# ----------------------------------------------------------------- complexity budget (tools/complexity_budget.py)
+[tool.complexity-budget]
+max_cc = 15
+paths = ["src", "tools", "evals"]
+
+[tool.complexity-budget.waivers]
+# Each waiver: one function, and why splitting it would add accidental complexity. Stale waivers fail the build.
+"pm_agent.connectors.msgraph.normalize_graph_message" = "Graph message field mapping; the branches mirror the vendor schema (review 2026-11-24)"
+"pm_agent.connectors.msgraph.normalize_workbook_rows" = "Tracker workbook column mapping; one branch per vendor column (review 2026-11-24)"

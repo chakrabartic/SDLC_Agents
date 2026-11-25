@@ -1,6 +1,7 @@
 """W1 ingestion + W2 problem builder through the ADK Runner (offline extractive model, in-test connectors)."""
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 
 import pytest
@@ -11,7 +12,17 @@ from pm_agent.grounding import LocalRedactor
 from pm_agent.ingestion_app import build_ingestion_app
 from pm_agent.placeholders import not_implemented
 from pm_agent.runtime import build_local_services
-from pm_agent.schemas import ClaimKind, RecordType, SourceSystem, VerificationOutcome
+from pm_agent.workflows.ask import build_review_problems
+from pm_agent.schemas import (
+    ClaimKind,
+    DuplicateCandidate,
+    DuplicateDecision,
+    PersonRef,
+    ProblemStatus,
+    RecordType,
+    SourceSystem,
+    VerificationOutcome,
+)
 from tests.component.helpers import AppSession
 from tests.support import local_settings
 
@@ -39,7 +50,8 @@ class FakeConnector:
             raise ConnectorError("unavailable", "sandbox down")
         if self.unconfigured:
             not_implemented("Q-13", "mailboxes in scope")
-        return PollResult(source=self.source, signals=self.signals if cursor is None else [], next_cursor="c1")
+        start = int(cursor) if cursor else 0  # delta semantics: the cursor is the position after the last delivery
+        return PollResult(source=self.source, signals=self.signals[start:], next_cursor=str(len(self.signals)))
 
     def get(self, record_id: str):  # type: ignore[no-untyped-def]
         return next((s for s in self.signals if s.source_record_id == record_id), None)
@@ -105,3 +117,66 @@ async def test_sources_awaiting_slb_details_are_reported_not_fatal() -> None:
     turn = await AppSession(build_ingestion_app(services, ExtractiveModelProvider())).send("ingest")
     summary = turn.output_of("emit_events")
     assert summary["source_health"]["onedrive"] == "not_configured" and summary["stored"] == 4
+
+
+async def test_reingestion_preserves_problem_fields_the_builder_does_not_own() -> None:
+    """Re-upserting a problem patches what W2 owns (title, links, aggregates…) and keeps PM-owned state."""
+    settings = local_settings()
+    services = build_local_services(settings, connectors=_connectors(settings))
+    await AppSession(build_ingestion_app(services, ExtractiveModelProvider())).send("ingest")
+    p1 = next(p for p in services.problems.list_problems() if len(p.linked_signals) == 3)
+    owner = PersonRef(token="PERSON_PM0001", role_hint="pm")
+    duplicate = DuplicateCandidate(ref="ado:7000009", system="ado", similarity=0.91, method="shingle",
+                                   decision=DuplicateDecision.DISTINCT)
+    services.problems.save(p1.model_copy(update={"owner_pm": owner, "product_line": "DrillOps",
+                                                 "duplicates": [duplicate], "status": ProblemStatus.GATHERING}))
+    redactor = LocalRedactor.from_settings(settings, pseudonym_key=b"k")
+    follow_up = _signal(redactor, SourceSystem.EMAIL, "msg-2", RecordType.EMAIL_MESSAGE, EMAIL_BODY, 5)
+    services.connectors[SourceSystem.EMAIL].signals.append(follow_up)  # type: ignore[attr-defined]
+    await AppSession(build_ingestion_app(services, ExtractiveModelProvider())).send("ingest")
+    updated = services.problems.get(p1.problem_id)
+    assert len(updated.linked_signals) == 4, "the follow-up mail joined the existing problem"
+    assert updated.owner_pm == owner and updated.product_line == "DrillOps"
+    assert updated.duplicates == [duplicate] and updated.status is ProblemStatus.GATHERING
+
+
+class FailOnceStore:
+    """Evidence store whose first ``add_signal`` fails (e.g. AlloyDB failover mid-window)."""
+
+    def __init__(self, inner):  # type: ignore[no-untyped-def]
+        self._inner, self.failures_left = inner, 1
+
+    def add_signal(self, signal):  # type: ignore[no-untyped-def]
+        if self.failures_left:
+            self.failures_left -= 1
+            raise ConnectionError("store unavailable")
+        self._inner.add_signal(signal)
+
+    def __getattr__(self, name):  # type: ignore[no-untyped-def]
+        return getattr(self._inner, name)
+
+
+async def test_a_failed_window_is_repolled_not_skipped() -> None:
+    """Cursors advance only once the window is stored and linked (docs/09 §1); a failure re-polls the window."""
+    settings = local_settings()
+    services = build_local_services(settings, connectors=_connectors(settings))
+    services.evidence = FailOnceStore(services.evidence)
+    app = build_ingestion_app(services, ExtractiveModelProvider())
+    with pytest.raises(ConnectionError):
+        await AppSession(app).send("ingest")
+    retry = await AppSession(app).send("ingest")
+    assert retry.output_of("emit_events")["stored"] == 4
+    assert len(services.problems.list_problems()) == 2
+    assert services.ingestion.cursor("pagerduty") == "1" and services.ingestion.cursor("onedrive") is None
+
+
+async def test_inbox_source_health_reflects_the_last_completed_poll() -> None:
+    settings = local_settings()
+    services = build_local_services(settings, connectors=_connectors(settings))
+    await AppSession(build_ingestion_app(services, ExtractiveModelProvider())).send("ingest")
+    assert services.ingestion.health() == {"ado": "ok", "email": "ok", "onedrive": "unavailable", "pagerduty": "ok",
+                                           "servicenow": "ok"}
+    inbox = build_review_problems(services)({})
+    texts = json.dumps(inbox["a2ui"])
+    assert "Partial data" in texts and "unavailable: onedrive" in texts
+    assert "servicenow" not in texts.split("Partial data", 1)[1].split('"', 1)[0]

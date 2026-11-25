@@ -5,6 +5,7 @@ No network: HTTP connectors are exercised through their pure request builders, a
 """
 from __future__ import annotations
 
+import base64
 import json
 from collections import Counter
 from collections.abc import Callable, Mapping
@@ -24,6 +25,7 @@ from pm_agent.connectors.common import (
     html_to_text,
     parse_utc,
     person_ref,
+    require_timestamp,
 )
 from pm_agent.connectors.entities import EntityResolver
 from pm_agent.connectors.fixtures import (
@@ -37,9 +39,9 @@ from pm_agent.connectors.http import HttpRequest, HttpxTransport, UnconfiguredTr
 from pm_agent.grounding import LocalRedactor
 from pm_agent.grounding.chunking import chunk_signal
 from pm_agent.grounding.dedup import jaccard_exact, jaccard_minhash
-from pm_agent.placeholders import PlaceholderNotImplemented
+from pm_agent.placeholders import PlaceholderNotImplemented, PlaceholderNotResolved
 from pm_agent.schemas import RecordType, Signal, SignalTypeHint, SourceSystem
-from pm_agent.settings import Settings, load_settings
+from pm_agent.settings import Environment, Settings, load_settings
 
 SECRET_MARKERS = ("hunter2", "3f9a1c0e7b2d4e6f8a0b1c2d3e4f5a6b")
 ORG, PROJECT = "example-org", "ExampleProject"
@@ -493,13 +495,32 @@ def test_graph_request_builders_and_cursor_guard() -> None:
                            "messages/delta")
     assert request.headers["Prefer"].startswith("odata.maxpagesize=50")
     nxt = api.mail_delta("pm-intake@pm.example.com", "inbox", page_size=50,
-                         cursor="https://graph.microsoft.com/v1.0/users/x/mailFolders/inbox/messages/delta?$skiptoken=1")
+                         cursor=("https://graph.microsoft.com/v1.0/users/pm-intake@pm.example.com/"
+                                 "mailFolders/inbox/messages/delta?$skiptoken=1"))
     assert nxt.url.endswith("$skiptoken=1") and not nxt.params
-    with pytest.raises(ConnectorError) as excinfo:
-        api.mail_delta("pm-intake@pm.example.com", "inbox", page_size=50, cursor="https://evil.example.com/steal")
-    assert excinfo.value.code == "validation_failed"  # cursors can never redirect us off Graph (SSRF)
+    encoded_at = api.mail_delta("pm-intake@pm.example.com", "inbox", page_size=50,
+                                cursor=("https://graph.microsoft.com/v1.0/users/pm-intake%40pm.example.com/"
+                                        "mailFolders/inbox/messages/delta(token='abc')"))
+    assert "token='abc'" in encoded_at.url
+    for bad_cursor in (
+        "https://evil.example.com/steal",
+        "https://graph.microsoft.com/v1.0/users/ceo@pm.example.com/mailFolders/inbox/messages/delta?$skiptoken=1",
+        "https://graph.microsoft.com/v1.0/users/pm-intake@pm.example.com/mailFolders/sentitems/messages/delta",
+        "https://graph.microsoft.com/v1.0/drives/b!DEMOdrive0001/root/delta",
+        "https://graph.microsoft.com/v1.0/users/pm-intake@pm.example.com/mailFolders/inbox/messages/delta/../../x",
+    ):
+        with pytest.raises(ConnectorError) as excinfo:
+            api.mail_delta("pm-intake@pm.example.com", "inbox", page_size=50, cursor=bad_cursor)
+        assert excinfo.value.code == "validation_failed", bad_cursor
     drive = api.drive_delta("b!DEMOdrive0001", page_size=20)
     assert drive.url == "https://graph.microsoft.com/v1.0/drives/b!DEMOdrive0001/root/delta"
+    drive_nxt = api.drive_delta("b!DEMOdrive0001", page_size=20,
+                                cursor="https://graph.microsoft.com/v1.0/drives/b!DEMOdrive0001/root/delta?token=1")
+    assert drive_nxt.url.endswith("?token=1")
+    with pytest.raises(ConnectorError) as cross_drive:
+        api.drive_delta("b!DEMOdrive0001", page_size=20,
+                        cursor="https://graph.microsoft.com/v1.0/drives/b!OTHERdrive999/root/delta?token=1")
+    assert cross_drive.value.code == "validation_failed"
     used = api.worksheet_used_range("b!DEMOdrive0001", "01DEMOTRACKER0001", "Tracker")
     assert used.url.endswith("/items/01DEMOTRACKER0001/workbook/worksheets/Tracker/usedRange(valuesOnly=true)")
     send = api.send_mail("pm-agent-outreach@pm.example.com", to=["pm@slb.com"], cc=[], subject="Hi", body="Text",
@@ -766,3 +787,210 @@ def test_unconfigured_transport_names_the_open_question() -> None:
     with pytest.raises(PlaceholderNotImplemented) as excinfo:
         UnconfiguredTransport("Q-07", "pagerduty").send(HttpRequest(method="GET", url="https://api.example.invalid"))
     assert excinfo.value.question_id == "Q-07"
+
+
+# ----------------------------------------------------------------------- shared helpers for the fixes below
+def _with_connector(settings: Settings, name: str, **overrides: Any) -> Settings:
+    """*settings* with ``connectors.<name>`` overridden (real values where the shipped config has placeholders)."""
+    connectors = {**settings.connectors, name: {**settings.connectors.get(name, {}), **overrides}}
+    return settings.model_copy(update={"connectors": connectors})
+
+
+# ------------------------------------------------------------- ADO: deleted items, work item ids, scope (I1/I6/I7)
+def _ado_batch(request: HttpRequest) -> dict[str, Any]:
+    """``workitemsbatch`` with ``errorPolicy=Omit``: deleted or inaccessible ids come back as ``null`` entries."""
+    known = {item["id"]: item for item in _ado_items()}
+    ids = request.json_body["ids"]
+    return {"count": len(ids), "value": [known.get(work_item_id) for work_item_id in ids]}
+
+
+def _ado_transport() -> RecordedTransport:
+    fixture = _load("ado", "workitems.json")
+    return RecordedTransport({
+        ("POST", "/_apis/wit/wiql"): {"workItems": [{"id": 9100123}, {"id": 9100999}, {"id": 9100456}]},
+        ("POST", "/_apis/wit/workitemsbatch"): _ado_batch,
+        ("GET", "/workItems/9100123/comments"): fixture["comments"]["9100123"],
+        ("GET", "/workItems/9100456/comments"): fixture["comments"]["9100456"],
+    })
+
+
+def test_http_ado_connector_skips_deleted_work_items(redactor: LocalRedactor, entities: EntityResolver) -> None:
+    connector = ado.HttpAdoConnector(organization=ORG, project=PROJECT, redactor=redactor, entities=entities,
+                                     transport=_ado_transport())
+    result = connector.poll("2026-05-01T00:00:00Z", limit=10)
+    expected = ado.FixtureAdoConnector(redactor, entities=entities).poll(None)
+    assert [s.signal_id for s in result.signals] == [s.signal_id for s in expected.signals]  # the null is skipped
+    assert result.next_cursor == "2026-05-14T16:20:00Z"
+    assert connector.get("9100999") is None  # deleted: a clean "not found", never AttributeError
+    assert connector.comments("9100999") == []
+    found = connector.get("9100123")
+    assert found is not None and found.signal_id == expected.signals[0].signal_id
+    assert [s.source_record_id for s in connector.search("depth logs", top=5)] == ["9100123", "9100456"]
+
+
+@pytest.mark.parametrize("record_id", ["\u00b2", "\u0663", "0", "-1", "+1", " 1", "1 ", "", "2147483648", "9" * 40])
+def test_http_ado_get_ignores_strings_that_cannot_be_work_item_ids(redactor: LocalRedactor, record_id: str) -> None:
+    transport = _ado_transport()
+    connector = ado.HttpAdoConnector(organization=ORG, project=PROJECT, redactor=redactor, transport=transport)
+    assert connector.get(record_id) is None
+    assert transport.requests == []  # no vendor round trip for an id ADO cannot have (positive int32, ASCII digits)
+
+
+def test_http_ado_connector_refuses_placeholder_area_paths(settings: Settings, redactor: LocalRedactor) -> None:
+    unscoped = _with_connector(settings, "ado", organization=ORG, project=PROJECT,
+                               area_paths="PLACEHOLDER:Q-04:ado_area_paths")
+    transport = _ado_transport()
+    connector = ado.HttpAdoConnector.from_settings(unscoped, redactor, transport=transport)
+    for call in (lambda: connector.poll(None), lambda: connector.get("9100123"), lambda: connector.search("logs")):
+        with pytest.raises(PlaceholderNotImplemented) as excinfo:
+            call()
+        assert excinfo.value.question_id == "Q-04"
+    assert transport.requests == []  # a placeholder scope never widens to the whole project
+    with pytest.raises(PlaceholderNotResolved):
+        ado.HttpAdoConnector.from_settings(unscoped.model_copy(update={"environment": Environment.STAGE}), redactor,
+                                           transport=transport)
+    scoped = ado.HttpAdoConnector.from_settings(
+        _with_connector(settings, "ado", organization=ORG, project=PROJECT, area_paths="ExampleProject\\Logs"),
+        redactor, transport=transport)
+    scoped.poll_records(None)
+    assert "[System.AreaPath] UNDER 'ExampleProject\\Logs'" in transport.requests[0].json_body["query"]
+
+
+# ------------------------------------------------------------ cursors, timestamps and anchored validation (I6)
+def _sn1(payload: str) -> str:
+    return "sn1:" + base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii")
+
+
+def _snow_transport() -> RecordedTransport:
+    """Table API replay: delta and ``number=`` reads per table, ``record`` by sys_id, journal by ``element_id``."""
+    data = _snow()
+
+    def rows_of(table: str) -> list[dict[str, Any]]:
+        return list(((data["tables"].get(table) or {}).get("result")) or [])
+
+    def table(name: str) -> Callable[[HttpRequest], dict[str, Any]]:
+        def answer(request: HttpRequest) -> dict[str, Any]:
+            query = dict(request.params)["sysparm_query"]
+            if query.startswith("number="):
+                return {"result": [r for r in rows_of(name) if r["number"]["value"] == query.removeprefix("number=")]}
+            return {"result": rows_of(name)}
+        return answer
+
+    def journal(request: HttpRequest) -> dict[str, Any]:
+        element_id = dict(request.params)["sysparm_query"].split("^")[0].removeprefix("element_id=")
+        return {"result": [e for e in data["sys_journal_field"]["result"] if e["element_id"] == element_id]}
+
+    def not_found(request: HttpRequest) -> dict[str, Any]:
+        raise ConnectorError("not_found", f"HTTP 404 for {request.path}")
+
+    case_sys_id = rows_of("sn_customerservice_case")[0]["sys_id"]["value"]
+    return RecordedTransport({
+        ("GET", "/api/now/table/incident"): table("incident"),
+        ("GET", "/api/now/table/sn_customerservice_case"): table("sn_customerservice_case"),
+        ("GET", f"/api/now/table/incident/{case_sys_id}"): not_found,
+        ("GET", f"/api/now/table/sn_customerservice_case/{case_sys_id}"): {"result": rows_of(
+            "sn_customerservice_case")[0]},
+        ("GET", "/api/now/table/sys_journal_field"): journal,
+    })
+
+
+def _snow_connector(redactor: LocalRedactor, transport: RecordedTransport) -> servicenow.HttpServiceNowConnector:
+    return servicenow.HttpServiceNowConnector(instance_url=SNOW, redactor=redactor, transport=transport,
+                                              tables=["incident", "sn_customerservice_case"])
+
+
+def test_http_servicenow_connector_with_recorded_responses(redactor: LocalRedactor) -> None:
+    transport = _snow_transport()
+    connector = _snow_connector(redactor, transport)
+    first = connector.poll(None)
+    assert [s.source_record_id for s in first.signals] == [
+        "INC9000456", "CS9000123", "1b2c3d4e5f6071829304a5b6c7d8e9f0", "2c3d4e5f60718293a4b5c6d7e8f90a1b"]
+    again = connector.poll_records(first.next_cursor)  # per-table watermarks round-trip through the opaque cursor
+    assert dict(transport.requests[-1].params)["sysparm_query"] == \
+        "sys_updated_on>=2026-05-10 09:00:00^ORDERBYsys_updated_on"
+    assert again.next_cursor == first.next_cursor
+    by_number, by_sys_id = connector.get("CS9000123"), connector.get("0a1b2c3d4e5f60718293a4b5c6d7e8f9")
+    assert by_number is not None and by_sys_id is not None and by_number.signal_id == by_sys_id.signal_id
+    assert len(connector.journal("CS9000123")) == 2 and connector.journal("INC0000000") == []
+    assert connector.get("not-a-record") is None
+
+
+@pytest.mark.parametrize("cursor", [
+    _sn1("[" * 100_000 + "]" * 100_000),  # nested beyond the decoder's recursion limit (RecursionError)
+    _sn1('{"a": ' * 100_000 + "1" + "}" * 100_000),
+    _sn1('{"incident": "2026-05-09 10:00:00\\n"}'),  # a trailing newline used to satisfy the ``$`` anchor
+    _sn1('{"incident\\n": "2026-05-09 10:00:00"}'),
+    _sn1('{"incident": "2026-02-30 10:00:00"}'),  # shaped like a timestamp, not a date
+    _sn1('{"incident": "\u0662\u0660\u0662\u0666-05-09 10:00:00"}'),  # non-ASCII digits
+    _sn1('["incident"]'), _sn1("null"), _sn1("{"), "sn1:%%%", "sn1:QQ", "fx:3", "garbage",
+])
+def test_servicenow_malformed_cursors_are_typed_validation_errors(redactor: LocalRedactor, cursor: str) -> None:
+    transport = _snow_transport()
+    with pytest.raises(ConnectorError) as excinfo:
+        _snow_connector(redactor, transport).poll_records(cursor)
+    assert excinfo.value.code == "validation_failed" and transport.requests == []
+
+
+def test_servicenow_validation_is_anchored_at_the_end_of_input(redactor: LocalRedactor) -> None:
+    api = servicenow.ServiceNowApi(SNOW)
+    for call in (lambda: api.delta_query("2026-05-09 10:00:00\n"), lambda: api.by_number("incident", "INC9000456\n"),
+                 lambda: api.record("incident", "6f1c2b3a4d5e6f708192a3b4c5d6e7f8\n"),
+                 lambda: api.table_delta("incident\n", None, limit=1),
+                 lambda: api.by_number("incident", "INC\u0669\u0660\u0660\u0660\u0664\u0665\u0666")):
+        with pytest.raises(ValueError):  # request builders keep raising ValueError (callers catch it)
+            call()
+    transport = _snow_transport()
+    connector = _snow_connector(redactor, transport)
+    assert connector.get("INC9000456\n") is None and connector.get("6f1c2b3a4d5e6f708192a3b4c5d6e7f8\n") is None
+    assert transport.requests == []
+
+
+def test_offset_cursors_and_timestamps_reject_near_misses() -> None:
+    for bad in ("fx:12\n", "fx:\u0661\u0662", " fx:1"):
+        with pytest.raises(ConnectorError):
+            decode_offset_cursor(bad)
+    for not_a_date in ("2026-02-30 10:00:00", "2026-13-01 00:00:00", "9999-12-31T23:59:59-23:59",
+                       "0001-01-01T00:00:00+23:59", "\u0662\u0660\u0662\u0666-05-09 10:00:00"):
+        assert parse_utc(not_a_date) is None, not_a_date
+        with pytest.raises(ConnectorError) as excinfo:
+            require_timestamp(not_a_date)
+        assert excinfo.value.code == "validation_failed"
+
+
+def test_ado_and_pagerduty_identifiers_are_anchored_at_the_end_of_input(redactor: LocalRedactor) -> None:
+    with pytest.raises(ValueError):
+        ado.AdoApi(ORG, PROJECT).create_work_item("Bug", {"System.Title\n": "x"}, validate_only=True)
+    with pytest.raises(ValueError):
+        pagerduty.PagerDutyApi().notes("Q1GOLDENP1PD01\n")
+    transport = RecordedTransport({})
+    connector = pagerduty.HttpPagerDutyConnector(redactor=redactor, transport=transport)
+    assert connector.get("Q1GOLDENP1PD01\n") is None and connector.notes("Q1GOLDENP1PD01\n") == []
+    assert transport.requests == []
+
+
+
+def test_http_pagerduty_connector_refuses_placeholder_service_ids(settings: Settings, redactor: LocalRedactor) -> None:
+    unscoped = _with_connector(settings, "pagerduty", service_ids="PLACEHOLDER:Q-07:pagerduty_service_ids")
+    transport = RecordedTransport({("GET", "/incidents"): {"incidents": []}})
+    connector = pagerduty.HttpPagerDutyConnector.from_settings(unscoped, redactor, transport=transport)
+    with pytest.raises(PlaceholderNotImplemented) as excinfo:
+        connector.poll_records(None)
+    assert excinfo.value.question_id == "Q-07" and transport.requests == []
+    with pytest.raises(PlaceholderNotResolved):
+        pagerduty.HttpPagerDutyConnector.from_settings(unscoped.model_copy(update={"environment": Environment.STAGE}),
+                                                       redactor, transport=transport)
+
+
+def test_http_figma_file_nodes_redacts_text_layers(redactor: LocalRedactor) -> None:
+    transport = RecordedTransport({
+        ("GET", "/v1/files/FILE1/nodes"): {
+            "name": "Prototype for jane.doe@example.com",
+            "nodes": {"1:2": {"document": {"id": "1:2", "type": "TEXT",
+                                           "characters": "Call +1 555 010 4477, Bearer supersecrettokenvalue123456"}}},
+        },
+    })
+    connector = figma.HttpFigmaConnector(team_id="TEAM1", file_keys=["FILE1"], redactor=redactor, transport=transport)
+    nodes = connector.file_nodes("FILE1", ["1:2"])
+    dumped = json.dumps(nodes)
+    assert "jane.doe@example.com" not in dumped and "555 010 4477" not in dumped and "supersecrettokenvalue" not in dumped
+    assert "[REDACTED:AUTH_TOKEN]" in dumped

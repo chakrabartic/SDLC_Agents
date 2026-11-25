@@ -10,7 +10,7 @@ from google.adk.workflow import node
 from pm_agent.a2ui import surfaces as ui
 from pm_agent.agents.factory import LlmNodes
 from pm_agent.agents.llm_schemas import AnswerOut, to_claim_drafts
-from pm_agent.runtime import Services
+from pm_agent.ports import Services
 from pm_agent.workflows.common import dump_blocked, dump_claims, evidence_item, request_text
 
 UNVERIFIED_NOTE = "Some statements were removed because they could not be verified against the evidence."
@@ -53,7 +53,7 @@ def build_review_problems(services: Services) -> Any:
     def review_problems(node_input: Any) -> dict[str, Any]:
         del node_input
         problems = sorted(services.problems.list_problems(), key=lambda p: (-len(p.linked_signals), p.problem_id))
-        health = {source.value: "configured" for source in services.connectors}
+        health = services.ingestion.health()  # last completed poll per source; never-polled sources make no claim
         return {"status": "ok",
                 "problems": [{"problem_id": p.problem_id, "title": p.title.text, "status": p.status.value,
                               "signals": len(p.linked_signals),

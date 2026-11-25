@@ -14,18 +14,19 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from collections.abc import Callable, Collection, Iterator, Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from pydantic import BaseModel, ValidationError
 
-from pm_agent.crypto import Signer, b64url_decode, b64url_encode, verify_es256
+from pm_agent.crypto import Signer
 from pm_agent.grounding.atoms import ATOMS_VERSION, AtomExtractor
 from pm_agent.grounding.evidence_store import EvidenceStore
 from pm_agent.grounding.judge import EntailmentJudge, JudgeUnavailable, JudgeVerdict
 from pm_agent.grounding.policy import ACTION_SUBJECT_TYPES, POLICY_VERSION, PolicyEngine
 from pm_agent.grounding.redaction import Redactor
+from pm_agent.grounding.reports import sign_report
 from pm_agent.schemas import (
     CITATION_REQUIRED,
     CheckResult,
@@ -39,43 +40,35 @@ from pm_agent.schemas import (
     DuplicateDecision,
     EvidenceChunk,
     FieldStatus,
-    InvestigationPack,
-    KnowledgeArticleDraft,
-    ProductProblem,
     PrototypeSpec,
     RequirementDraft,
     Signal,
     SignalStatus,
     Span,
     SubjectRef,
-    TraceLink,
     VerificationOutcome,
     VerificationReport,
     VerificationStatus,
-    canonical_json,
     compute_provenance_hash,
     content_sha256,
     new_id,
     sha256_hex,
     string_leaves,
 )
+from pm_agent.schemas.subjects import (
+    SUBJECT_TYPES,
+    iter_claims,
+    subject_digest,
+    subject_duplicates,
+    subject_id,
+    subject_type_of,
+)
 from pm_agent.settings import Settings
 
-SUBJECT_TYPES: dict[str, type[BaseModel]] = {
-    "requirement_draft": RequirementDraft,
-    "knowledge_article_draft": KnowledgeArticleDraft,
-    "prototype_spec": PrototypeSpec,
-    "product_problem": ProductProblem,
-    "trace_link": TraceLink,
-    "investigation_pack": InvestigationPack,
-}
-# Workflow bookkeeping that changes *after* verification; excluded so a report keeps matching its subject.
-VOLATILE_FIELDS = frozenset({"verification_report_id", "approval_state"})
 CLAIM_CHECKS = ("V1", "V2", "V3", "V4", "V5")
 # V5 judges statements read from evidence; aggregates are recomputed by code (V6) instead.
 JUDGED_KINDS = frozenset({ClaimKind.FACT, ClaimKind.CLASSIFICATION, ClaimKind.PM_JUDGMENT})
 _NUMBER = re.compile(r"-?\d+(?:\.\d+)?")
-_ID_FIELDS = ("spec_id", "article_id", "requirement_id", "pack_id", "link_id", "problem_id")  # most specific first
 _INFERRED_PATH = re.compile(r"^fields\.(?P<name>[^.\[]+)\.claims\[\d+\]$")
 _JUDGE_CACHE_MAX = 4096
 
@@ -123,52 +116,6 @@ class _CheckFailed(Exception):
         super().__init__(f"{check_id}: {reason}")
         self.check_id = check_id
         self.reason = reason
-
-
-def subject_digest(subject: BaseModel) -> str:
-    """The hash reports and approvals bind to: canonical JSON of the subject minus bookkeeping fields."""
-    data = subject.model_dump(mode="json")
-    for name in VOLATILE_FIELDS:
-        data.pop(name, None)
-    return content_sha256(data)
-
-
-def subject_id(subject: BaseModel) -> str:
-    for name in _ID_FIELDS:
-        value = getattr(subject, name, None)
-        if isinstance(value, str):
-            return value
-    return "unknown"
-
-
-def iter_claims(obj: Any, path: str = "") -> Iterator[tuple[str, Claim]]:
-    """Every ``Claim`` inside a (nested) subject, with its dotted path (e.g. ``fields.summary.claims[0]``)."""
-    if isinstance(obj, Claim):
-        yield path, obj
-    elif isinstance(obj, BaseModel):
-        for name in type(obj).model_fields:
-            yield from iter_claims(getattr(obj, name), f"{path}.{name}" if path else name)
-    elif isinstance(obj, dict):
-        for key, value in obj.items():
-            yield from iter_claims(value, f"{path}.{key}" if path else str(key))
-    elif isinstance(obj, (list, tuple)):
-        for index, value in enumerate(obj):
-            yield from iter_claims(value, f"{path}[{index}]")
-
-
-def report_signing_input(report: VerificationReport) -> bytes:
-    return canonical_json(report.model_dump(mode="json", exclude={"signature"}))
-
-
-def verify_report_signature(report: VerificationReport, public_key_pem: bytes) -> bool:
-    """True iff the report carries a valid ES256 signature by the holder of *public_key_pem*."""
-    if not report.signature:
-        return False
-    try:
-        signature = b64url_decode(report.signature)
-    except ValueError:
-        return False
-    return verify_es256(public_key_pem, report_signing_input(report), signature)
 
 
 class Verifier:  # pylint: disable=too-many-instance-attributes
@@ -289,9 +236,12 @@ class Verifier:  # pylint: disable=too-many-instance-attributes
             span, quote = located
         if len(quote) > max_chars:
             raise _CheckFailed("V3", f"quote longer than {max_chars} characters")
-        return Citation(evidence_id=chunk.evidence_id, signal_id=signal.signal_id,
-                        source_system=signal.source_system, source_record_id=signal.source_record_id,
-                        permalink=signal.permalink, span=span, quote=quote)
+        try:
+            return Citation(evidence_id=chunk.evidence_id, signal_id=signal.signal_id,
+                            source_system=signal.source_system, source_record_id=signal.source_record_id,
+                            permalink=signal.permalink, span=span, quote=quote)
+        except ValidationError as exc:  # e.g. a whitespace-expanded quote past the schema limit: block, never crash
+            raise _CheckFailed("V3", f"quote cannot be cited ({exc.error_count()} schema error(s))") from exc
 
     def _entailment(self, text: str, quotes: list[str], *, dual_judge: bool) -> None:
         """V5: bounded judge(s) must return ``entailed`` with a valid quote index; any error fails closed."""
@@ -332,7 +282,7 @@ class Verifier:  # pylint: disable=too-many-instance-attributes
             self._v7_inference(subject, claims, commit_bound),
             self._v8_redaction(claims, target_payload, commit_bound),
             self._v9_policy(subject, subject_type, commit_bound, target_action, target_payload),
-            self._v10_near_duplicates(subject, claims),
+            self._v10_near_duplicates(subject, claims, commit_bound),
         ]
         if any(c.status is CheckStatus.FAIL for c in checks):
             overall = VerificationOutcome.FAIL
@@ -356,9 +306,7 @@ class Verifier:  # pylint: disable=too-many-instance-attributes
         return self.sign(report)
 
     def sign(self, report: VerificationReport) -> VerificationReport:
-        unsigned = report.model_copy(update={"signature": None, "signing_key_id": self._signer.key_id})
-        signature = b64url_encode(self._signer.sign(report_signing_input(unsigned)))
-        return unsigned.model_copy(update={"signature": signature})
+        return sign_report(report, self._signer)
 
     def _claim_checks(self, claims: list[tuple[str, Claim]], dual: bool) -> tuple[list[CheckResult], list[str]]:
         failures: dict[str, list[tuple[str, str]]] = {check: [] for check in CLAIM_CHECKS}
@@ -371,6 +319,12 @@ class Verifier:  # pylint: disable=too-many-instance-attributes
         results = []
         for check_id in CLAIM_CHECKS:
             failed = failures[check_id]
+            if check_id == "V5" and not failed and not self._settings.verifier.judge_required:
+                # A signed report must never claim an entailment check that did not run (docs/06 §4).
+                results.append(CheckResult(check_id="V5", status=CheckStatus.SKIPPED,
+                                           details="entailment judge disabled (verifier.judge_required=false); "
+                                                   f"{len(claims)} claims not judged"))
+                continue
             results.append(CheckResult(
                 check_id=check_id, status=CheckStatus.FAIL if failed else CheckStatus.PASS,
                 details="; ".join(f"{cid}: {reason}" for cid, reason in failed) or f"{len(claims)} claims checked",
@@ -474,14 +428,25 @@ class Verifier:  # pylint: disable=too-many-instance-attributes
                 reasons.append(f"P-07: component keys not in the pinned DLS catalog: {unknown}")
         return reasons
 
-    def _v10_near_duplicates(self, subject: BaseModel, claims: list[tuple[str, Claim]]) -> CheckResult:
-        known: list[DuplicateCandidate] = list(getattr(subject, "near_duplicates", []) or [])
+    def _v10_near_duplicates(self, subject: BaseModel, claims: list[tuple[str, Claim]],
+                             commit_bound: bool) -> CheckResult:
+        """V10 (docs/06 §6.3): candidates come from the subject (with the PM's decisions) and the configured source.
+
+        A commit-bound subject whose type records duplicates fails closed without a source, like V8/V9/P-07: an
+        unconfigured checker must not read as "no duplicates".
+        """
+        known = subject_duplicates(subject)
+        if self._near_dups is None:
+            entry = subject_type_of(subject)
+            if commit_bound and entry is not None and entry.duplicates_field is not None:
+                return CheckResult(check_id="V10", status=CheckStatus.FAIL,
+                                   details=f"no near-duplicate source configured for a commit-bound {entry.name}")
+            if not known:
+                return CheckResult(check_id="V10", status=CheckStatus.SKIPPED, details="no near-duplicate source")
         resolved = {d.ref for d in known if d.decision is not DuplicateDecision.PENDING}
         candidates = list(known)
         if self._near_dups is not None:
             candidates += self._near_dups.find(" ".join(c.text for _, c in claims))
-        elif not known:
-            return CheckResult(check_id="V10", status=CheckStatus.SKIPPED, details="no near-duplicate source")
         threshold = self._settings.verifier.near_duplicate_threshold
         pending = sorted({c.ref for c in candidates if c.similarity >= threshold and c.ref not in resolved
                           and c.decision is DuplicateDecision.PENDING})

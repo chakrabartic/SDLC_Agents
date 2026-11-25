@@ -84,18 +84,18 @@ class GeminiEntailmentJudge:
 
     def judge(self, claim_text: str, quotes: Sequence[str]) -> JudgeVerdict:
         """One schema-constrained, temperature-0 call; any error or out-of-range index raises ``JudgeUnavailable``."""
-        from google.genai import types  # pylint: disable=import-outside-toplevel
-
-        config_kwargs: dict[str, Any] = {
-            "system_instruction": self._instruction,
-            "temperature": 0.0,
-            "response_mime_type": "application/json",
-            "response_schema": _JudgeOutput,
-        }
-        if self._armor:
-            config_kwargs["model_armor_config"] = types.ModelArmorConfig(
-                prompt_template_name=self._armor, response_template_name=self._armor)
         try:
+            from google.genai import types  # pylint: disable=import-outside-toplevel
+
+            config_kwargs: dict[str, Any] = {
+                "system_instruction": self._instruction,
+                "temperature": 0.0,
+                "response_mime_type": "application/json",
+                "response_schema": _JudgeOutput,
+            }
+            if self._armor:
+                config_kwargs["model_armor_config"] = types.ModelArmorConfig(
+                    prompt_template_name=self._armor, response_template_name=self._armor)
             response = self._client.models.generate_content(
                 model=self._model, contents=build_judge_prompt(claim_text, quotes),
                 config=types.GenerateContentConfig(**config_kwargs))

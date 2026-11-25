@@ -8,11 +8,25 @@ child node run via ``ctx.run_node`` so it is checkpointed and never repeated on 
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable, Mapping
 from typing import Any
 
+from pydantic import BaseModel
+
 from pm_agent.grounding.verifier import BlockedClaim
-from pm_agent.runtime import Services
-from pm_agent.schemas import Claim, RecordType, Signal, SignalStatus, SourceSystem
+from pm_agent.ports import Services
+from pm_agent.schemas import (
+    Actor,
+    Claim,
+    LedgerEntryType,
+    ProductProblem,
+    RecordType,
+    Signal,
+    SignalStatus,
+    SourceSystem,
+    SubjectRef,
+)
+from pm_agent.schemas.subjects import subject_digest, subject_id
 
 PROBLEM_ID = re.compile(r"\bprb_[0-9A-Z]{26}\b")
 MAX_EVIDENCE_ITEMS = 24
@@ -31,6 +45,30 @@ def request_text(node_input: Any) -> str:
 def find_problem_id(text: str) -> str | None:
     match = PROBLEM_ID.search(text)
     return match.group(0) if match else None
+
+
+def resolve_problem(services: Services, node_input: Any, *, ask: str) -> ProductProblem | dict[str, str]:
+    """The problem named by ``{"problem_id"}`` or a ``prb_…`` id in the request — or an ``{error, message}`` output."""
+    data = node_input if isinstance(node_input, dict) else {}
+    problem_id = data.get("problem_id") or find_problem_id(request_text(node_input))
+    if not problem_id:
+        return {"error": "no_problem", "message": ask}
+    try:
+        return services.problems.get(problem_id)
+    except LookupError:
+        return {"error": "unknown_problem", "message": f"No product problem {problem_id}."}
+
+
+def save_draft(services: Services, subject_type: str, subject: BaseModel, *, related: Iterable[SubjectRef] = (),
+               payload: Mapping[str, Any] | None = None) -> str:
+    """Store an immutable draft version and ledger ``DRAFT_SAVED`` (ids and hashes only); returns the subject ref."""
+    ref = services.subjects.put(subject_type, subject)
+    version = getattr(subject, "version", None)
+    saved = SubjectRef(type=subject_type, id=subject_id(subject), version=version if isinstance(version, int) else None,
+                       sha256=subject_digest(subject))
+    services.ledger.record(LedgerEntryType.DRAFT_SAVED, actor=Actor(type="agent", id=services.agent_id),
+                           subject_refs=[saved, *related], payload={"draft_ref": ref, **(payload or {})})
+    return ref
 
 
 def evidence_item(signal: Signal, evidence_id: str, text: str) -> dict[str, Any]:

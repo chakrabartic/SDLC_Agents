@@ -15,7 +15,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from pm_agent.grounding.verifier import subject_digest, subject_id
+from pm_agent.schemas.subjects import subject_digest, subject_id
 from pm_agent.hitl.ledger import GENESIS_HASH
 from pm_agent.schemas import (
     ActionType,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 from typing import Any, Literal
@@ -198,3 +199,16 @@ class VerificationReport(_Model):
     def check(self, check_id: str) -> CheckResult | None:
         """The result for one check id (``V0``…``V10``), if present."""
         return next((c for c in self.checks if c.check_id == check_id), None)
+
+
+CommitOutcome = Literal["committed", "refused", "failed", "changes_requested"]
+
+
+@dataclass(frozen=True)
+class CommitResult:
+    """What the zero-LLM commit executor reports back (in-process locally, the A2A response in production)."""
+
+    action_id: str
+    outcome: CommitOutcome
+    external_ref: dict[str, str] | None = None
+    error: str | None = None

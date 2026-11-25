@@ -43,7 +43,6 @@ from pm_agent.a2ui.actions import (
     SPLIT_SIGNAL,
     START_REQUIREMENT,
 )
-from pm_agent.grounding.verifier import subject_digest
 from pm_agent.schemas import (
     ActionStatus,
     ActionType,
@@ -66,10 +65,12 @@ from pm_agent.schemas import (
     ReadinessStatus,
     RequirementDraft,
     Signal,
+    SignalLink,
     VerificationOutcome,
     VerificationReport,
     content_sha256,
 )
+from pm_agent.schemas.subjects import subject_digest
 
 MISSING_TEXT: Final = "missing — see clarifying question"
 INFERRED_TEXT: Final = "⚠ Inferred — needs your confirmation"
@@ -449,41 +450,21 @@ def duplicate_decision_surface(subject_id: str, candidates: list[DuplicateCandid
     return sb.messages(ids)
 
 
-def problem_detail_surface(problem: ProductProblem, signals: list[Signal], *,
-                           reveal_allowed: bool = False) -> list[dict[str, Any]]:
-    """Problem Detail (FR-A2/A3, FR-C1): cited claims, linked signals, evidence excerpts with chips.
+def _signal_row(signal_id: str, signal: Signal | None, link: SignalLink | None) -> views.Row:
+    """One row of the linked-signals table (signals or links may be missing on either side)."""
+    return {"signal_id": signal_id,
+            "source_system": signal.source_system.value if signal else None,
+            "record_id": signal.source_record_id if signal else None,
+            "record_type": signal.record_type.value if signal else None,
+            "captured_utc": signal.model_dump(mode="json")["captured_utc"] if signal else None,
+            "link_type": link.link_type.value if link else None,
+            "score": round(link.score, 4) if link else None,
+            "permalink": signal.permalink if signal else None}
 
-    Events: ``start_requirement`` / ``investigate`` ``{problemId}``; ``confirm_merge`` / ``link_duplicate`` /
-    ``mark_distinct`` per pending duplicate; ``split_signal`` ``{problemId, signalIds: @/split/signal_ids}``.
-    *reveal_allowed* only toggles the EvidencePanel re-identification affordance (enforced by the BFF).
-    """
-    by_id = {s.signal_id: s for s in signals}
-    sections = views.problem_sections(problem)
-    claims = [claim for _, _, group in views.problem_claim_groups(problem) for claim in group]
-    linked = {link.signal_id: link for link in problem.linked_signals}
-    order = [*linked, *(s.signal_id for s in signals if s.signal_id not in linked)]
-    rows: list[views.Row] = []
-    for signal_id in order:
-        signal, link = by_id.get(signal_id), linked.get(signal_id)
-        rows.append({"signal_id": signal_id,
-                     "source_system": signal.source_system.value if signal else None,
-                     "record_id": signal.source_record_id if signal else None,
-                     "record_type": signal.record_type.value if signal else None,
-                     "captured_utc": signal.model_dump(mode="json")["captured_utc"] if signal else None,
-                     "link_type": link.link_type.value if link else None,
-                     "score": round(link.score, 4) if link else None,
-                     "permalink": signal.permalink if signal else None})
-    evidence = views.evidence_items(claims, by_id)
-    sb = SurfaceBuilder(f"problem_{problem.problem_id}_v{problem.version}")
-    sb.data.update({"problem": {"problem_id": problem.problem_id, "version": problem.version,
-                                "status": problem.status.value, "product_line": problem.product_line,
-                                "classification_confidence": problem.classification_confidence.value},
-                    "sections": sections, "signals": views.table(_SIGNAL_COLUMNS, rows), "evidence": evidence,
-                    "reveal_allowed": reveal_allowed, "split": {"signal_ids": []}})
-    ids = [sb.text("title", heading(f"Problem: {problem.title.text}")),
-           sb.text("meta", md(f"{problem.problem_id} · v{problem.version} · {problem.status.value} · "
-                              f"{problem.classification.text} ({problem.classification_confidence.value} confidence)"
-                              f" · product line {problem.product_line or 'n/a'}"), caption=True)]
+
+def _problem_alerts(sb: SurfaceBuilder, problem: ProductProblem) -> list[str]:
+    """Low-confidence and partial-data banners (IR3: partial data is loud)."""
+    ids = []
     if problem.classification_confidence is Confidence.LOW:
         ids.append(sb.text("low_confidence", md("⚠ Low-confidence classification — needs your confirmation"),
                            live="polite"))
@@ -494,7 +475,10 @@ def problem_detail_surface(problem: ProductProblem, signals: list[Signal], *,
                                            + ", ".join(problem.sources_unavailable)), live="assertive"),
                 sb.slb("source_health", "SourceHealth", a11y="Source health", live="polite",
                        sources=bind("source_health"))]
+    return ids
 
+
+def _overview_tab(sb: SurfaceBuilder, problem: ProductProblem, sections: Sequence[views.Section]) -> list[str]:
     overview = _section_blocks(sb, sections)
     if problem.duplicates:
         overview.append(sb.text("duplicates_title", heading("Possible duplicates", 3)))
@@ -504,20 +488,27 @@ def problem_detail_surface(problem: ProductProblem, signals: list[Signal], *,
                   a11y="Start a requirement draft for this problem", primary=True),
         sb.button("investigate_btn", "Investigate", INVESTIGATE, {"problemId": problem.problem_id},
                   a11y="Open an investigation pack for this problem")]))
+    return overview
 
-    signal_children = [sb.slb("signals_table", "DataTable", a11y="Linked signals", columns=bind("signals", "columns"),
-                              rows=bind("signals", "rows"))]
+
+def _signals_tab(sb: SurfaceBuilder, problem: ProductProblem, by_id: Mapping[str, Signal]) -> list[str]:
+    children = [sb.slb("signals_table", "DataTable", a11y="Linked signals", columns=bind("signals", "columns"),
+                       rows=bind("signals", "rows"))]
     if problem.linked_signals:
         options = [(f"{by_id[i].source_system.value} {by_id[i].source_record_id}" if i in by_id else i, i)
-                   for i in linked]
-        signal_children.append(sb.row("split_row", [
+                   for i in (link.signal_id for link in problem.linked_signals)]
+        children.append(sb.row("split_row", [
             sb.choice_picker("split_picker", "Signals to split off", options, bind("split", "signal_ids"),
                              a11y="Signals to split into another problem", multiple=True),
             sb.button("split_btn", "Split signal", SPLIT_SIGNAL,
                       {"problemId": problem.problem_id, "signalIds": bind("split", "signal_ids")},
                       a11y="Split the selected signals into another problem")]))
+    return children
 
-    evidence_children = []
+
+def _evidence_tab(sb: SurfaceBuilder, evidence: Sequence[Mapping[str, Any]]) -> list[str]:
+    """A CitationChip + EvidencePanel card per cited evidence item (re-identification is enforced by the BFF)."""
+    children = []
     for index, item in enumerate(evidence):
         cite, cid = item["citation"], f"ev_{index}"
         chip = sb.slb(f"{cid}_chip", "CitationChip", a11y=f"Citation {cite['evidence_id']}",
@@ -531,15 +522,80 @@ def problem_detail_surface(problem: ProductProblem, signals: list[Signal], *,
                        quote=bind("evidence", index, "citation", "quote"),
                        span=bind("evidence", index, "citation", "span"), signal=bind("evidence", index, "signal"),
                        revealAllowed=bind("reveal_allowed"))
-        evidence_children.append(sb.card(cid, sb.column(f"{cid}_body", [chip, panel])))
-    if not evidence_children:
-        evidence_children.append(sb.text("no_evidence", md("No citations on this problem yet.")))
+        children.append(sb.card(cid, sb.column(f"{cid}_body", [chip, panel])))
+    if not children:
+        children.append(sb.text("no_evidence", md("No citations on this problem yet.")))
+    return children
 
+
+def problem_detail_surface(problem: ProductProblem, signals: list[Signal], *,
+                           reveal_allowed: bool = False) -> list[dict[str, Any]]:
+    """Problem Detail (FR-A2/A3, FR-C1): cited claims, linked signals, evidence excerpts with chips.
+
+    Events: ``start_requirement`` / ``investigate`` ``{problemId}``; ``confirm_merge`` / ``link_duplicate`` /
+    ``mark_distinct`` per pending duplicate; ``split_signal`` ``{problemId, signalIds: @/split/signal_ids}``.
+    *reveal_allowed* only toggles the EvidencePanel re-identification affordance (enforced by the BFF).
+    """
+    by_id = {s.signal_id: s for s in signals}
+    sections = views.problem_sections(problem)
+    claims = [claim for _, _, group in views.problem_claim_groups(problem) for claim in group]
+    linked = {link.signal_id: link for link in problem.linked_signals}
+    order = [*linked, *(s.signal_id for s in signals if s.signal_id not in linked)]
+    rows = [_signal_row(signal_id, by_id.get(signal_id), linked.get(signal_id)) for signal_id in order]
+    evidence = views.evidence_items(claims, by_id)
+    sb = SurfaceBuilder(f"problem_{problem.problem_id}_v{problem.version}")
+    sb.data.update({"problem": {"problem_id": problem.problem_id, "version": problem.version,
+                                "status": problem.status.value, "product_line": problem.product_line,
+                                "classification_confidence": problem.classification_confidence.value},
+                    "sections": sections, "signals": views.table(_SIGNAL_COLUMNS, rows), "evidence": evidence,
+                    "reveal_allowed": reveal_allowed, "split": {"signal_ids": []}})
+    ids = [sb.text("title", heading(f"Problem: {problem.title.text}")),
+           sb.text("meta", md(f"{problem.problem_id} · v{problem.version} · {problem.status.value} · "
+                              f"{problem.classification.text} ({problem.classification_confidence.value} confidence)"
+                              f" · product line {problem.product_line or 'n/a'}"), caption=True),
+           *_problem_alerts(sb, problem)]
+    overview, signal_children = _overview_tab(sb, problem, sections), _signals_tab(sb, problem, by_id)
+    evidence_children = _evidence_tab(sb, evidence)  # children first, then containers (stable component order)
     ids.append(sb.tabs("problem_tabs", [("Overview", sb.column("overview_tab", overview)),
                                         ("Signals", sb.column("signals_tab", signal_children)),
                                         ("Evidence", sb.column("evidence_tab", evidence_children))],
                        a11y="Problem details"))
     return sb.messages(ids)
+
+
+def _inbox_row(problem: ProductProblem) -> views.Row:
+    return {"problem_id": problem.problem_id, "title": problem.title.text,
+            "classification": problem.classification.text, "confidence": problem.classification_confidence.value,
+            "status": problem.status.value, "signals": len(problem.linked_signals),
+            "customers": problem.affected_customers.text if problem.affected_customers else "",
+            "open_questions": sum(1 for q in problem.open_questions if q.status is QuestionStatus.OPEN),
+            "partial_sources": ", ".join(problem.sources_unavailable)}
+
+
+def _needs_attention(problem: ProductProblem) -> bool:
+    """Low-confidence classification, partial data or open clarifying questions."""
+    return (problem.classification_confidence is Confidence.LOW or bool(problem.sources_unavailable)
+            or any(q.status is QuestionStatus.OPEN for q in problem.open_questions))
+
+
+def _inbox_open_row(sb: SurfaceBuilder, problems: list[ProductProblem]) -> str:
+    picker = sb.choice_picker("open_picker", "Problem", [(p.title.text, p.problem_id) for p in problems],
+                              bind("selection", "problem_ids"), a11y="Problem to open", multiple=False,
+                              filterable=True)
+    opener = sb.button("open_btn", "Open problem", OPEN_PROBLEM, {"problemIds": bind("selection", "problem_ids")},
+                       a11y="Open the selected problem", primary=True)
+    return sb.row("open_row", [picker, opener])
+
+
+def _inbox_filter_row(sb: SurfaceBuilder) -> str:
+    return sb.row("filter_row", [
+        sb.choice_picker("status_filter", "Status", [(label(s.value), s.value) for s in ProblemStatus],
+                         bind("filter", "status"), a11y="Filter by status", multiple=True),
+        sb.choice_picker("classification_filter", "Classification", [(label(c.value), c.value) for c in ProblemClass],
+                         bind("filter", "classification"), a11y="Filter by classification", multiple=True),
+        sb.button("filter_btn", "Apply filter", FILTER,
+                  {"status": bind("filter", "status"), "classification": bind("filter", "classification")},
+                  a11y="Apply the inbox filter")])
 
 
 def problem_inbox_surface(problems: list[ProductProblem], source_health: dict[str, str]) -> list[dict[str, Any]]:
@@ -551,14 +607,8 @@ def problem_inbox_surface(problems: list[ProductProblem], source_health: dict[st
     sources = [{"source": name, "status": status, "healthy": _healthy(status)}
                for name, status in sorted(source_health.items())]
     unhealthy = [str(s["source"]) for s in sources if not s["healthy"]]
-    rows: list[views.Row] = [{
-        "problem_id": p.problem_id, "title": p.title.text, "classification": p.classification.text,
-        "confidence": p.classification_confidence.value, "status": p.status.value, "signals": len(p.linked_signals),
-        "customers": p.affected_customers.text if p.affected_customers else "",
-        "open_questions": sum(1 for q in p.open_questions if q.status is QuestionStatus.OPEN),
-        "partial_sources": ", ".join(p.sources_unavailable)} for p in problems]
-    attention = sum(1 for p in problems if p.classification_confidence is Confidence.LOW or p.sources_unavailable
-                    or any(q.status is QuestionStatus.OPEN for q in p.open_questions))
+    rows = [_inbox_row(p) for p in problems]
+    attention = sum(1 for p in problems if _needs_attention(p))
     sb = SurfaceBuilder("problem_inbox")
     sb.data.update({"source_health": sources, "table": views.table(_INBOX_COLUMNS, rows),
                     "selection": {"problem_ids": []}, "filter": {"status": [], "classification": []}})
@@ -572,22 +622,10 @@ def problem_inbox_surface(problems: list[ProductProblem], source_health: dict[st
     if problems:
         ids.append(sb.slb("inbox_table", "DataTable", a11y="Problems", columns=bind("table", "columns"),
                           rows=bind("table", "rows")))
-        picker = sb.choice_picker("open_picker", "Problem", [(p.title.text, p.problem_id) for p in problems],
-                                  bind("selection", "problem_ids"), a11y="Problem to open", multiple=False,
-                                  filterable=True)
-        opener = sb.button("open_btn", "Open problem", OPEN_PROBLEM, {"problemIds": bind("selection", "problem_ids")},
-                           a11y="Open the selected problem", primary=True)
-        ids.append(sb.row("open_row", [picker, opener]))
+        ids.append(_inbox_open_row(sb, problems))
     else:
         ids.append(sb.text("empty", md("No problems match the current filter.")))
-    ids.append(sb.row("filter_row", [
-        sb.choice_picker("status_filter", "Status", [(label(s.value), s.value) for s in ProblemStatus],
-                         bind("filter", "status"), a11y="Filter by status", multiple=True),
-        sb.choice_picker("classification_filter", "Classification", [(label(c.value), c.value) for c in ProblemClass],
-                         bind("filter", "classification"), a11y="Filter by classification", multiple=True),
-        sb.button("filter_btn", "Apply filter", FILTER,
-                  {"status": bind("filter", "status"), "classification": bind("filter", "classification")},
-                  a11y="Apply the inbox filter")]))
+    ids.append(_inbox_filter_row(sb))
     return sb.messages(ids)
 
 

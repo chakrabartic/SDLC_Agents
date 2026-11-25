@@ -9,7 +9,7 @@ from __future__ import annotations
 import threading
 from typing import Any
 
-from pm_agent.mcp_servers.write_server import WriteHandler
+from pm_agent.gateway import WriteHandler
 
 
 class RecordingWriteBackend:

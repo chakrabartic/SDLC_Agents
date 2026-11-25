@@ -4,7 +4,7 @@ Every containerised component ships the same package; ``PM_AGENT_COMPONENT`` sel
 
 * ``mcp-*`` — our MCP servers (``pm_agent.mcp_servers.factory``): Streamable HTTP at ``/mcp`` + ``GET /healthz``.
 * ``signal-event-gateway`` — the webhook ingress (``pm_agent.event_gateway``).
-* ``pm-workbench`` / ``svc-prototype-renderer`` — ASGI apps loaded lazily (``module:create_app``).
+* ``pm-workbench`` / ``svc-prototype-renderer`` — ASGI apps loaded lazily (``module:factory``).
 * ``dls-catalog-sync`` / ``ledger-anchor`` — batch jobs (``module:main``); ``PM_AGENT_JOB`` (e.g. ``recluster`` on the
   ``mcp-correlation`` image) runs a job instead of the server.
 
@@ -36,7 +36,7 @@ from pm_agent.event_gateway import InMemoryHintPublisher, PubSubHintPublisher, W
 from pm_agent.event_gateway import create_app as create_gateway_app
 from pm_agent.event_gateway.hints import DEFAULT_HINTS_TOPIC, HintPublisher
 from pm_agent.grounding.redaction import SdpRedactor
-from pm_agent.hitl.write_guard import WriteToolGuard
+from pm_agent.hitl.write_guard import JtiRegistry, WriteToolGuard
 from pm_agent.mcp_servers.factory import build_server, http_app
 from pm_agent.mcp_servers.local import APPROVAL_KEY_ENV, VERIFIER_KEY_ENV, local_services
 from pm_agent.mcp_servers.registry import READ_SERVERS, SERVER_TOOLS, WRITE_SERVERS
@@ -69,7 +69,7 @@ COMPONENTS: dict[str, Component] = {
     "pm-workbench": Component("pm-workbench", "asgi", "pm_agent.workbench.app:create_app"),
     "signal-event-gateway": Component("signal-event-gateway", "gateway"),
     **{name: Component(name, "mcp") for name in SERVER_TOOLS if name != "svc-prototype-renderer"},
-    "svc-prototype-renderer": Component("svc-prototype-renderer", "asgi", "pm_agent.renderer.app:create_app"),
+    "svc-prototype-renderer": Component("svc-prototype-renderer", "asgi", "pm_agent.runtime:renderer_app"),
     "dls-catalog-sync": Component("dls-catalog-sync", "job", "pm_agent.jobs.dls_catalog_sync:main"),
     "ledger-anchor": Component("ledger-anchor", "job", "pm_agent.jobs.ledger_anchor:main"),
 }
@@ -124,13 +124,19 @@ def _sdp_redactor(settings: Settings, environ: Mapping[str, str]) -> SdpRedactor
                        custom_infotypes=dict(settings.grounding.custom_infotypes))
 
 
-def _kms_guard(settings: Settings, environ: Mapping[str, str]) -> WriteToolGuard:
+def _kms_guard(settings: Settings, environ: Mapping[str, str], *,
+               registry: JtiRegistry | None = None) -> WriteToolGuard:
     key_version = environ.get(APPROVAL_KEY_ENV, "")
     if not key_version or "PLACEHOLDER:" in key_version:
         not_implemented("Q-10", "approval-token-signer KMS key version (PM_AGENT_APPROVAL_KEY)")
+    if registry is None:
+        # Cloud Run scales write servers across instances, so an in-process jti set cannot enforce single use.
+        not_implemented("Q-10", "durable jti registry (Memorystore SET NX / AlloyDB hitl.token_executions) "
+                                "for write-server single-use enforcement")
     signer = KmsSigner(key_version)
     return WriteToolGuard(keys={signer.key_id: signer.public_key_pem()}, audience=settings.hitl.token_audience,
-                          issuer=settings.hitl.token_issuer, leeway_seconds=settings.hitl.clock_skew_seconds)
+                          issuer=settings.hitl.token_issuer, leeway_seconds=settings.hitl.clock_skew_seconds,
+                          registry=registry)
 
 
 def _read_connectors(component: str, settings: Settings, services: ServerServices, environ: Mapping[str, str]

@@ -67,7 +67,8 @@ A production-grade, multi-agent **"human middleware"** for SLB Product Managers.
 | 13 | [Testing & evaluation](docs/13-testing-and-evaluation.md) | TDD strategy, golden scenarios, eval suites E1–E8 |
 | 14 | [Implementation roadmap](docs/14-implementation-roadmap.md) | Milestones M0–M7, repo layout, pins, spikes |
 | 15 | [Risks, assumptions, open questions](docs/15-risks-assumptions-open-questions.md) | Q-01…Q-15 for SLB, risk register |
-| 16 | [Architecture decision records](docs/16-architecture-decision-records.md) | ADR-001…ADR-010 (accepted) |
+| 16 | [Architecture decision records](docs/16-architecture-decision-records.md) | ADR-001…ADR-011 (accepted) |
+| 17 | [Technical debt register](docs/17-technical-debt-register.md) | Deferred P0/P1/P2 items for M1–M4 (sandboxes / multi-replica infra) |
 
 ## Approved decisions (G2, 2026-11-24)
 
@@ -119,7 +120,7 @@ SLB/
 
 ```bash
 make install          # editable install + dev tools into .venv (Python 3.13)
-make check            # policy lint + pylint + mypy --strict + pytest   (CI gates 1-4)
+make check            # policy lint + pylint 10/10 + mypy --strict + complexity budget + pytest (branch cov ≥ 89%)
 make evals            # offline evaluation baseline (no credentials)
 make placeholders     # regenerate PLACEHOLDERS.md
 ```

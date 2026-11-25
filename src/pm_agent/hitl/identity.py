@@ -42,6 +42,14 @@ def assertion_sha256(assertion: str) -> str:
     return "sha256:" + sha256_hex(assertion)
 
 
+def _subject(value: object) -> str:
+    """The approver's stable subject. Empty, blank or non-string subjects are unauthenticated: an approval must be
+    attributable to exactly one person (docs/07 §5), and ``str(None)`` must never become the identity ``"None"``."""
+    if not isinstance(value, str) or not value.strip():
+        raise IdentityError("assertion has no subject")
+    return value
+
+
 class PlaceholderGroupResolver:
     """Until Q-08 is answered we do not know where SLB group membership is asserted."""
 
@@ -72,7 +80,7 @@ class IapJwtVerifier:
             raise IdentityError("IAP assertion rejected") from exc
         if claims.get("iss") != IAP_ISSUER:
             raise IdentityError("unexpected issuer")
-        subject, email = str(claims.get("sub", "")), str(claims.get("email", ""))
+        subject, email = _subject(claims.get("sub")), str(claims.get("email") or "")
         return Approver(sub=subject, email=email, idp=self._idp, groups=self._groups.groups_for(subject, email))
 
 
@@ -103,6 +111,8 @@ class LocalIdentityVerifier:
             now = int(self._clock().timestamp())
             if body.get("aud") != self._audience or not body.get("iat", now + 1) <= now < body.get("exp", 0):
                 raise IdentityError("assertion expired or for another audience")
-            return Approver.model_validate(body["approver"])
+            approver = Approver.model_validate(body["approver"])
         except (ValueError, KeyError, ValidationError) as exc:
             raise IdentityError("malformed assertion") from exc
+        _subject(approver.sub)
+        return approver

@@ -9,7 +9,10 @@ Token format (identical in Python, YAML and Terraform so one grep finds them all
 
     PLACEHOLDER:<question-id>:<snake_case_name>      e.g.  PLACEHOLDER:Q-10:gcp_org_id
 
-Placeholders are tolerated in ``local``/``dev`` and rejected in ``stage``/``prod`` (strict mode).
+Placeholders are tolerated in ``local``/``dev`` and rejected in ``stage``/``prod`` (strict mode). Strict checks
+search for the token *anywhere* — inside a longer value (``https://PLACEHOLDER:Q-05:host/api``) or in a mapping key —
+with the same grammar as ``tools/list_placeholders.py``, so the registry and the stage/prod refusal cannot disagree.
+``parse_placeholder`` / ``is_placeholder`` stay exact: they answer "is this value *only* a token?".
 """
 
 from __future__ import annotations
@@ -22,6 +25,7 @@ PREFIX = "PLACEHOLDER:"
 _QUESTION_RE = re.compile(r"^Q-\d{2}$")
 _NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 _TOKEN_RE = re.compile(r"^PLACEHOLDER:(Q-\d{2}):([a-z][a-z0-9_]*)$")
+_TOKEN_SEARCH = re.compile(r"PLACEHOLDER:(Q-\d{2}):([a-z][a-z0-9_]*)")  # == tools/list_placeholders.py TOKEN
 
 T = TypeVar("T")
 
@@ -66,24 +70,29 @@ def is_placeholder(value: object) -> bool:
 
 
 def require(value: T, *, strict: bool) -> T:
-    """Return *value*; in strict mode refuse to hand out an unresolved placeholder."""
-    parsed = parse_placeholder(value)
-    if parsed and strict:
-        question_id, name = parsed
-        raise PlaceholderNotResolved(question_id, name, "value must be supplied before use in this environment")
+    """Return *value*; in strict mode refuse one that contains an unresolved placeholder anywhere inside it."""
+    found = find_placeholders(value) if strict else []
+    if found:
+        path, question_id, name = found[0]
+        where = f" (at {path})" if path else ""
+        raise PlaceholderNotResolved(question_id, name, f"value must be supplied before use in this environment{where}")
     return value
 
 
 def find_placeholders(obj: object, path: str = "") -> list[tuple[str, str, str]]:
-    """Recursively list ``(dotted_path, question_id, name)`` for every placeholder inside *obj*."""
+    """Recursively list ``(dotted_path, question_id, name)`` for every placeholder token inside *obj*.
+
+    Tokens are found as substrings of string values *and* mapping keys (a key's path is the key itself).
+    """
     found: list[tuple[str, str, str]] = []
-    parsed = parse_placeholder(obj)
-    if parsed:
-        found.append((path, parsed[0], parsed[1]))
+    if isinstance(obj, str):
+        found.extend((path, match.group(1), match.group(2)) for match in _TOKEN_SEARCH.finditer(obj))
     elif isinstance(obj, Mapping):
         for key, child in obj.items():
-            found.extend(find_placeholders(child, f"{path}.{key}" if path else str(key)))
-    elif isinstance(obj, Sequence) and not isinstance(obj, (str, bytes)):
+            child_path = f"{path}.{key}" if path else str(key)
+            found.extend(find_placeholders(key, child_path) if isinstance(key, str) else [])
+            found.extend(find_placeholders(child, child_path))
+    elif isinstance(obj, Sequence) and not isinstance(obj, bytes):
         for index, child in enumerate(obj):
             found.extend(find_placeholders(child, f"{path}[{index}]"))
     return found

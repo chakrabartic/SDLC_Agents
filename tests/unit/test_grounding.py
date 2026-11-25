@@ -13,7 +13,8 @@ from pm_agent.grounding.evidence_store import InMemoryEvidenceStore
 from pm_agent.grounding.judge import JudgeUnavailable, JudgeVerdict
 from pm_agent.grounding.policy import PolicyEngine
 from pm_agent.grounding.redaction import LocalRedactor
-from pm_agent.grounding.verifier import Verifier, verify_report_signature
+from pm_agent.grounding.reports import verify_report_signature
+from pm_agent.grounding.verifier import Verifier
 from pm_agent.schemas import (
     ActionType,
     CitedQuote,
@@ -182,13 +183,22 @@ def test_inference_outside_inferred_field_fails_v7(store, settings) -> None:  # 
 
 
 # ------------------------------------------------------------------------------------------------ redaction
+PEM_BODY = ("MIIEowIBAAKCAQEAu1SU1LfVLPHCozMxH2Mo4lgOEePzNm0tRgeLezV6ffAt0gun\n"
+            "VTLw7onLRnrq0/IzW7yWR7QkrmBL7jTKEn5u+qKhbwKfBstIs+bMY2Zkp18gnTxK\n"
+            "LxoS2tFczGkPLPgizskuemMghRniWaoLcyehkd3qqGElvW/VDL5AaWTg0nLVkjRo9z+=")
+PEM = f"-----BEGIN RSA PRIVATE KEY-----\n{PEM_BODY}\n-----END RSA PRIVATE KEY-----"
+
+
 def test_local_redactor_removes_secrets_and_pseudonymizes_emails(settings) -> None:  # type: ignore[no-untyped-def]
+    """docs/06 §5.2: a full PEM block (header, base64 body, END line) is replaced, not just its header."""
     redactor = LocalRedactor.from_settings(settings, pseudonym_key=b"test-key")
-    text = "Contact jane.doe@example.com; conn Server=db;Password=hunter2; -----BEGIN RSA PRIVATE KEY-----"
+    text = f"Contact jane.doe@example.com; conn Server=db;Password=hunter2; key:\n{PEM}\nthanks"
     out = redactor.redact(text)
     assert "hunter2" not in out.text and "jane.doe@example.com" not in out.text
     assert "[REDACTED:CONNECTION_STRING_PASSWORD]" in out.text
     assert "[REDACTED:PRIVATE_KEY_BLOCK]" in out.text
+    assert all(line not in out.text for line in PEM_BODY.splitlines()) and "-----END" not in out.text
+    assert out.text.endswith("\nthanks") and redactor.inspect(out.text) == {}
     assert out.findings["EMAIL_ADDRESS"] == 1
     assert redactor.redact("mail jane.doe@example.com").text.split()[-1] == out.text.split()[1].rstrip(";")
 

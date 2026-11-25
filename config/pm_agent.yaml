@@ -90,7 +90,8 @@ grounding:                     # docs/06 §3.1 atom extraction
     ADO_OR_GITHUB_PAT: '\b[a-z0-9]{52}\b'
     AZURE_SAS_SIGNATURE: 'sig=[A-Za-z0-9%/+=]{20,}'
     CONNECTION_STRING_PASSWORD: '(?i)(password|pwd|accountkey)\s*=\s*[^;\s]+'
-    PRIVATE_KEY_BLOCK: '-----BEGIN [A-Z ]*PRIVATE KEY-----'
+    # The whole block (header, base64 body, END line); a block without an END line is redacted to the end of the text.
+    PRIVATE_KEY_BLOCK: '-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY(?: BLOCK)?-----|\Z)'
 
 readiness_checklist:           # FR-A5 (slb-readiness-v1)
   id: slb-readiness-v1

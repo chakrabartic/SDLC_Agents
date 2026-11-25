@@ -11,8 +11,5 @@ def __getattr__(name: str) -> Any:
     if name == "app":
         from pm_agent.runtime import LOCAL_EXECUTOR_ID, build_services  # pylint: disable=import-outside-toplevel
 
-        services = build_services()
-        if services.executor is None:
-            raise RuntimeError("this environment has no in-process commit executor")
-        return build_executor_app(services.executor, LOCAL_EXECUTOR_ID)
+        return build_executor_app(build_services().executor, LOCAL_EXECUTOR_ID)
     raise AttributeError(name)

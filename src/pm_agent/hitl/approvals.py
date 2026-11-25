@@ -7,8 +7,14 @@ Invariants enforced here:
 * **H-2** decisions come from an authenticated human (IAP assertion), never from the proposing agent;
 * **H-3** tokens are signed with a key only this service holds (KMS in production);
 * **H-5** tokens are single-use, short-lived, revocable; consumption and ``COMMIT_STARTED`` are one atomic step.
+
+Every state change follows one order — compute → sign → write the ledger → mutate in-memory state — and entries
+that belong together (``DECISION_RECORDED`` + ``TOKEN_ISSUED``/``TOKEN_REVOKED``, ``TOKEN_CONSUMED`` +
+``COMMIT_STARTED``) are written as one atomic batch (``Ledger.record_many``). A failing signer or ledger therefore
+leaves nothing half-applied, and a retry behaves like the first attempt (docs/07 §9).
 The reference keeps state in memory under one lock; production keeps it in AlloyDB ``hitl.*`` tables and performs
-the same checks inside one transaction per call.
+the same checks inside one transaction per call (the KMS signature happens between two transactions, guarded by the
+action's optimistic ``version``).
 """
 
 from __future__ import annotations
@@ -22,10 +28,10 @@ from typing import Any
 
 from pm_agent.crypto import Signer
 from pm_agent.grounding.policy import PolicyEngine
-from pm_agent.grounding.verifier import verify_report_signature
+from pm_agent.grounding.reports import verify_report_signature
 from pm_agent.hitl.catalog import ActionCatalog, ActionSpec, UnknownAction
 from pm_agent.hitl.identity import IdentityError, IdentityVerifier, assertion_sha256
-from pm_agent.hitl.ledger import Ledger
+from pm_agent.hitl.ledger import MAX_PAYLOAD_STRING, Ledger, NewEntry
 from pm_agent.hitl.tokens import mint_token
 from pm_agent.placeholders import is_placeholder
 from pm_agent.schemas import (
@@ -40,6 +46,7 @@ from pm_agent.schemas import (
     SubjectRef,
     VerificationOutcome,
     VerificationReport,
+    canonical_json,
     content_sha256,
     new_id,
     sha256_hex,
@@ -49,6 +56,34 @@ from pm_agent.settings import Settings
 
 LEDGER_ACTOR = Actor(type="system", id="mcp-ledger")
 _AGENT_PREFIXES = ("spiffe://", "principal://agents.")
+_DECIDE_ATTEMPTS = 3  # optimistic re-plans when a concurrent decision lands while a token is being signed
+_EXTERNAL_REF_KEYS = ("external_id", "url")  # the only caller-supplied keys a COMMIT_SUCCEEDED entry may carry
+_ERROR_MAX_CHARS = 256
+
+
+def _fits(value: str, limit: int) -> bool:
+    return len(value) <= limit and len(canonical_json(value)) - 2 <= limit  # escapes and UTF-8 bytes count too
+
+
+def _bounded(value: str, limit: int = MAX_PAYLOAD_STRING) -> str:
+    """``value`` if the ledger's size guard accepts it, else a readable prefix + ``...sha256:<hex>`` of the whole.
+
+    For caller-supplied strings that arrive *after* the vendor write succeeded: refusing them would leave a created
+    object without its ``COMMIT_SUCCEEDED``. The digest keeps a shortened value verifiable against the vendor record;
+    ``limit`` bounds characters and encoded bytes, and lone surrogates (unencodable) become ``?``.
+    """
+    text = value.encode("utf-8", "replace").decode("utf-8")
+    if _fits(text, limit):
+        return text
+    suffix = "...sha256:" + sha256_hex(text)
+    kept: list[str] = []
+    size = len(suffix)
+    for char in text:
+        size += len(canonical_json(char)) - 2
+        if size > limit:
+            break
+        kept.append(char)
+    return "".join(kept) + suffix
 
 
 class ApprovalError(Exception):
@@ -79,6 +114,33 @@ class _TokenRecord:
     claims: ApprovalTokenClaims
     consumed_by: str | None = None
     revoked: bool = False
+
+
+@dataclass(frozen=True)
+class _DecisionPlan:
+    """What one decision will do, computed under the lock against one action ``version``."""
+
+    action: ProposedAction
+    spec: ActionSpec
+    groups: list[str]
+    claims: ApprovalTokenClaims | None  # set when this approval completes the approver rule: a token gets minted
+
+
+def _refusal_code(action: ProposedAction, record: _TokenRecord | None, now: datetime) -> str | None:
+    """Why ``consume_token`` must refuse — checked in this order — or ``None`` when the token may be burned.
+
+    Pure (no ledger, no state change) so the precedence is testable on its own: a consumed token stays
+    ``token_consumed`` even after a later revocation; ``exp`` is exclusive, like ``verify_token`` without leeway.
+    """
+    if record is not None and record.consumed_by:
+        return "token_consumed"
+    if record is not None and record.revoked:
+        return "token_revoked"
+    if record is None or action.status is not ActionStatus.APPROVED:
+        return "not_approved"
+    if now.timestamp() >= record.claims.exp:
+        return "token_expired"
+    return None
 
 
 class ApprovalService:  # pylint: disable=too-many-instance-attributes
@@ -178,21 +240,33 @@ class ApprovalService:  # pylint: disable=too-many-instance-attributes
     # ----------------------------------------------------------------------------------------------- decide
     def decide(self, *, action_id: str, decision: Decision, assertion: str, comment: str = "",
                expected_version: int | None = None) -> DecisionOutcome:
-        """Record an authenticated PM decision; mint the approval token once the approver rule is satisfied."""
+        """Record an authenticated PM decision; mint the approval token once the approver rule is satisfied.
+
+        The decision is validated against one action ``version`` under the lock; the token is signed *outside* it
+        (a KMS round trip must not serialise every approval); then the version is re-checked and the ledger batch is
+        written before any in-memory change. A signer or ledger failure leaves no trace, so the PM's retry is not
+        refused as ``duplicate_approver``; a concurrent decision landing mid-signature triggers a re-plan.
+        """
         approver = self._authenticate(assertion, action_id)
-        with self._lock:
-            action, spec = self._decidable(action_id, decision, expected_version)
-            groups = self._authorize(spec, action, approver, decision)
-            record = ApprovalDecision(action_id=action_id, decision=decision, approver=approver, comment=comment,
-                                      decided_utc=self._clock(), authn_assertion_sha256=assertion_sha256(assertion))
-            self._decisions.append(record)
-            self._ledger.record(LedgerEntryType.DECISION_RECORDED, actor=Actor(type="human", id=approver.sub),
-                                payload={"action_id": action_id, "decision": decision.value,
-                                         "decision_id": record.decision_id, "groups": groups,
-                                         "authn_assertion_sha256": record.authn_assertion_sha256,
-                                         "comment_sha256": "sha256:" + sha256_hex(comment)},
-                                trace_id=action.trace_id)
-            return self._apply(action, spec, approver, decision)
+        for _ in range(_DECIDE_ATTEMPTS):
+            with self._lock:
+                plan = self._plan(action_id, decision, approver, expected_version)
+                if plan.claims is None:
+                    return self._commit_decision(plan, decision, approver, assertion, comment, token=None)
+            token = self._sign(plan.claims)
+            with self._lock:
+                if self._get(action_id).version == plan.action.version:
+                    return self._commit_decision(plan, decision, approver, assertion, comment, token=token)
+        raise ApprovalError("conflict", "the action kept changing while its token was being signed; retry")
+
+    def _plan(self, action_id: str, decision: Decision, approver: Approver,
+              expected_version: int | None) -> _DecisionPlan:
+        """Validate (status, separation of duties, groups, duplicates) and decide whether a token will be minted."""
+        action, spec = self._decidable(action_id, decision, expected_version)
+        groups = self._authorize(spec, action, approver, decision)
+        completes = decision is Decision.APPROVE and self._quorum(spec, [*self._approvers[action_id], approver])
+        return _DecisionPlan(action=action, spec=spec, groups=groups,
+                             claims=self._claims(action, spec, approver) if completes else None)
 
     def _authenticate(self, assertion: str, action_id: str) -> Approver:
         try:
@@ -228,24 +302,43 @@ class ApprovalService:  # pylint: disable=too-many-instance-attributes
             raise ApprovalError("duplicate_approver", "the same person cannot satisfy the two-person rule twice")
         return groups
 
-    def _apply(self, action: ProposedAction, spec: ActionSpec, approver: Approver,
-               decision: Decision) -> DecisionOutcome:
+    def _commit_decision(self, plan: _DecisionPlan, decision: Decision, approver: Approver, assertion: str,
+                         comment: str, *, token: str | None) -> DecisionOutcome:
+        """Write ``DECISION_RECORDED`` (+ ``TOKEN_ISSUED`` / ``TOKEN_REVOKED``) atomically, then change state."""
+        action, spec = plan.action, plan.spec
+        human = Actor(type="human", id=approver.sub)
+        record = ApprovalDecision(action_id=action.action_id, decision=decision, approver=approver, comment=comment,
+                                  decided_utc=self._clock(), authn_assertion_sha256=assertion_sha256(assertion))
+        issued = _TokenRecord(token=token, claims=plan.claims) if token and plan.claims else None
+        revoked = None if decision is Decision.APPROVE else self._revocable(action.action_id)
+        entries = [NewEntry(LedgerEntryType.DECISION_RECORDED, human, {
+            "action_id": action.action_id, "decision": decision.value, "decision_id": record.decision_id,
+            "groups": plan.groups, "authn_assertion_sha256": record.authn_assertion_sha256,
+            "comment_sha256": "sha256:" + sha256_hex(comment)}, trace_id=action.trace_id)]
+        if issued is not None:
+            entries.append(NewEntry(LedgerEntryType.TOKEN_ISSUED, LEDGER_ACTOR, {
+                "action_id": action.action_id, "jti": issued.claims.jti, "exp": issued.claims.exp,
+                "scope": spec.scope, "kid": self._signer.key_id}, trace_id=action.trace_id))
+        if revoked is not None:
+            entries.append(NewEntry(LedgerEntryType.TOKEN_REVOKED, human, {
+                "action_id": action.action_id, "jti": revoked.claims.jti, "reason": decision.value},
+                trace_id=action.trace_id))
+        self._ledger.record_many(entries)
+        # In-memory state changes only after the ledger accepted the whole batch.
+        self._decisions.append(record)
         approvers = self._approvers[action.action_id]
-        issued = False
         if decision is Decision.APPROVE:
             approvers.append(approver)
-            if self._quorum(spec, approvers):
-                self._mint(action, spec, approver)
-                action = self._update(action, ActionStatus.APPROVED)
-                issued = True
-            else:
-                action = self._update(action, ActionStatus.PENDING_APPROVAL)
+            if issued is not None:
+                self._tokens[action.action_id] = issued
+            status = ActionStatus.APPROVED if issued is not None else ActionStatus.PENDING_APPROVAL
         else:
-            self._revoke(action.action_id, Actor(type="human", id=approver.sub), reason=decision.value)
+            if revoked is not None:
+                revoked.revoked = True
             status = ActionStatus.REJECTED if decision is Decision.REJECT else ActionStatus.CHANGES_REQUESTED
-            action = self._update(action, status)
-        return DecisionOutcome(action=action.model_copy(deep=True), token_issued=issued, approvals=len(approvers),
-                               required=spec.min_approvals)
+        updated = self._update(action, status)
+        return DecisionOutcome(action=updated.model_copy(deep=True), token_issued=issued is not None,
+                               approvals=len(approvers), required=spec.min_approvals)
 
     def _resolve_group(self, logical: str) -> str:
         mapped = self._settings.hitl.idp_group_mapping.get(logical, logical)
@@ -265,26 +358,25 @@ class ApprovalService:  # pylint: disable=too-many-instance-attributes
         return any(all(groups[i] in memberships[person] for i, person in enumerate(assignment))
                    for assignment in itertools.permutations(range(len(approvers)), len(groups)))
 
-    def _mint(self, action: ProposedAction, spec: ActionSpec, approver: Approver) -> None:
+    def _claims(self, action: ProposedAction, spec: ActionSpec, approver: Approver) -> ApprovalTokenClaims:
         now = int(self._clock().timestamp())
         report = self._reports[action.verification_report_id]
-        claims = ApprovalTokenClaims(iss=self._settings.hitl.token_issuer, sub=approver.sub,
-                                     aud=self._settings.hitl.token_audience, jti=new_id("tok"), iat=now,
-                                     exp=now + 60 * self._settings.hitl.token_ttl_minutes, act=action.action_id,
-                                     pah=str(action.payload_sha256), tgt=action.target, scp=[spec.scope],
-                                     vrf=report.subject_sha256)
-        self._tokens[action.action_id] = _TokenRecord(token=mint_token(claims, self._signer), claims=claims)
-        self._ledger.record(LedgerEntryType.TOKEN_ISSUED, actor=LEDGER_ACTOR, payload={
-            "action_id": action.action_id, "jti": claims.jti, "exp": claims.exp, "scope": spec.scope,
-            "kid": self._signer.key_id}, trace_id=action.trace_id)
+        return ApprovalTokenClaims(iss=self._settings.hitl.token_issuer, sub=approver.sub,
+                                   aud=self._settings.hitl.token_audience, jti=new_id("tok"), iat=now,
+                                   exp=now + 60 * self._settings.hitl.token_ttl_minutes, act=action.action_id,
+                                   pah=str(action.payload_sha256), tgt=action.target, scp=[spec.scope],
+                                   vrf=report.subject_sha256)
 
-    def _revoke(self, action_id: str, actor: Actor, reason: str) -> None:
+    def _sign(self, claims: ApprovalTokenClaims) -> str:
+        """Mint the JWS (H-3). A signer failure is a typed, retryable refusal that has changed nothing."""
+        try:
+            return mint_token(claims, self._signer)
+        except Exception as exc:  # pylint: disable=broad-exception-caught  # KMS/transport errors share no base
+            raise ApprovalError("signer_unavailable", type(exc).__name__) from exc
+
+    def _revocable(self, action_id: str) -> _TokenRecord | None:
         record = self._tokens.get(action_id)
-        if record is None or record.revoked or record.consumed_by:
-            return
-        record.revoked = True
-        self._ledger.record(LedgerEntryType.TOKEN_REVOKED, actor=actor, payload={
-            "action_id": action_id, "jti": record.claims.jti, "reason": reason})
+        return None if record is None or record.revoked or record.consumed_by else record
 
     # -------------------------------------------------------------------------------------------- consume
     def consume_token(self, *, action_id: str, consumer: str) -> IssuedToken:
@@ -293,44 +385,59 @@ class ApprovalService:  # pylint: disable=too-many-instance-attributes
         with self._lock:
             action = self._get(action_id)
             record = self._tokens.get(action_id)
-            code = None
-            if record is not None and record.consumed_by:
-                code = "token_consumed"
-            elif record is not None and record.revoked:
-                code = "token_revoked"
-            elif record is None or action.status is not ActionStatus.APPROVED:
-                code = "not_approved"
-            elif self._clock().timestamp() >= record.claims.exp:
-                code = "token_expired"
+            code = _refusal_code(action, record, self._clock())
+            if code == "token_expired":
+                self._ledger.record_many([
+                    NewEntry(LedgerEntryType.ACTION_EXPIRED, LEDGER_ACTOR,
+                             {"action_id": action_id, "from_status": action.status.value}, trace_id=action.trace_id),
+                    NewEntry(LedgerEntryType.POLICY_DENIED, executor, {"code": code, "action_id": action_id},
+                             trace_id=action.trace_id),
+                ])
                 self._update(action, ActionStatus.EXPIRED)
+                raise ApprovalError(code)
             if code or record is None:
                 self._deny(executor, code or "not_approved", action_id=action_id)
                 raise ApprovalError(code or "not_approved")
+            self._ledger.record_many([
+                NewEntry(LedgerEntryType.TOKEN_CONSUMED, executor,
+                         {"action_id": action_id, "jti": record.claims.jti}, trace_id=action.trace_id),
+                NewEntry(LedgerEntryType.COMMIT_STARTED, executor, {"action_id": action_id},
+                         trace_id=action.trace_id),
+            ])
             record.consumed_by = consumer
             self._update(action, ActionStatus.COMMITTING)
-            self._ledger.record(LedgerEntryType.TOKEN_CONSUMED, actor=executor,
-                                payload={"action_id": action_id, "jti": record.claims.jti}, trace_id=action.trace_id)
-            self._ledger.record(LedgerEntryType.COMMIT_STARTED, actor=executor,
-                                payload={"action_id": action_id}, trace_id=action.trace_id)
             return IssuedToken(token=record.token, claims=record.claims)
 
     def record_commit(self, *, action_id: str, actor_id: str, succeeded: bool,
                       external_ref: dict[str, str] | None = None, error: str | None = None,
                       changes_requested: bool = False, report_id: str | None = None) -> ProposedAction:
-        """Close a started commit: ``COMMIT_SUCCEEDED`` (COMMITTED) or ``COMMIT_FAILED`` (FAILED/CHANGES_REQUESTED)."""
+        """Close a started commit: ``COMMIT_SUCCEEDED`` (COMMITTED) or ``COMMIT_FAILED`` (FAILED/CHANGES_REQUESTED).
+
+        Only the executor that consumed the token may close it; caller-supplied ``external_ref`` is restricted to
+        ``external_id``/``url``, reserved keys are written last, and over-long strings are shortened with a SHA-256
+        digest so a succeeded vendor write is never orphaned by the ledger's payload-size guard.
+        """
         executor = Actor(type="agent", id=actor_id)
         with self._lock:
             action = self._get(action_id)
             if action.status is not ActionStatus.COMMITTING:
                 raise ApprovalError("not_committing", f"action is {action.status.value}")
-            details: dict[str, Any] = {"action_id": action_id, "reverification_report_id": report_id}
+            record = self._tokens.get(action_id)
+            if record is None or record.consumed_by != actor_id:
+                self._deny(executor, "not_committer", action_id=action_id)
+                raise ApprovalError("not_committer", "only the executor that consumed the token may close the commit")
+            details: dict[str, Any] = {}
             if succeeded:
-                details |= dict(external_ref or {})
+                for key in _EXTERNAL_REF_KEYS:
+                    if external_ref and key in external_ref and external_ref[key] is not None:
+                        details[key] = _bounded(str(external_ref[key]))
                 entry_type, status = LedgerEntryType.COMMIT_SUCCEEDED, ActionStatus.COMMITTED
             else:
-                details["error"] = (error or "unknown")[:256]
+                details["error"] = _bounded(error or "unknown", limit=_ERROR_MAX_CHARS)
                 entry_type = LedgerEntryType.COMMIT_FAILED
                 status = ActionStatus.CHANGES_REQUESTED if changes_requested else ActionStatus.FAILED
+            details["action_id"] = action_id
+            details["reverification_report_id"] = _bounded(report_id) if report_id is not None else None
             self._ledger.record(entry_type, actor=executor, payload=details, trace_id=action.trace_id)
             return self._update(action, status).model_copy(deep=True)
 

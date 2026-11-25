@@ -17,18 +17,10 @@ from pydantic import BaseModel
 from pm_agent.a2ui import surfaces as ui
 from pm_agent.agents.factory import LlmNodes
 from pm_agent.agents.llm_schemas import KbArticleOut, to_claim_draft, to_claim_drafts
-from pm_agent.grounding.verifier import subject_digest
-from pm_agent.runtime import Services
-from pm_agent.schemas import (
-    ActionType,
-    Actor,
-    KbAudience,
-    KnowledgeArticleDraft,
-    LedgerEntryType,
-    SubjectRef,
-)
+from pm_agent.ports import Services
+from pm_agent.schemas import ActionType, KbAudience, KnowledgeArticleDraft, SubjectRef
 from pm_agent.workflows.approval import build_approval_nodes
-from pm_agent.workflows.common import dump_blocked, find_problem_id, problem_pack, request_text
+from pm_agent.workflows.common import dump_blocked, problem_pack, resolve_problem, save_draft
 from pm_agent.workflows.rendering import claims_html
 
 KB = ActionType.KB_PUBLISH_ARTICLE.value
@@ -50,18 +42,14 @@ def build_capture_knowledge(services: Services, llm: LlmNodes) -> Any:
     settings, verifier = services.settings, services.verifier
 
     def load_resolution(node_input: Any) -> dict[str, Any]:
+        problem = resolve_problem(services, node_input, ask="Which resolved problem should become a knowledge article?")
+        if isinstance(problem, dict):
+            return problem
         data = node_input if isinstance(node_input, dict) else {}
-        problem_id = data.get("problem_id") or find_problem_id(request_text(node_input))
-        if not problem_id:
-            return {"error": "no_problem", "message": "Which resolved problem should become a knowledge article?"}
-        try:
-            problem = services.problems.get(problem_id)
-        except LookupError:
-            return {"error": "unknown_problem", "message": f"No product problem {problem_id}."}
         audience = str(data.get("audience") or KbAudience.INTERNAL.value)
-        return {"problem_id": problem_id, "audience": audience if audience in {a.value for a in KbAudience}
+        return {"problem_id": problem.problem_id, "audience": audience if audience in {a.value for a in KbAudience}
                 else KbAudience.INTERNAL.value, "product": problem.product_line or settings.product.pilot_product_line,
-                "pack": problem_pack(services, problem_id)}
+                "pack": problem_pack(services, problem.problem_id)}
 
     def assemble_article(node_input: dict[str, Any]) -> dict[str, Any]:
         raw = KbArticleOut.model_validate(node_input["raw"])
@@ -81,12 +69,9 @@ def build_capture_knowledge(services: Services, llm: LlmNodes) -> Any:
                                         workaround=sections["workaround"].passed,
                                         applies_to_product=loaded["product"], audience=KbAudience(loaded["audience"]),
                                         derived_from_resolution=loaded["problem_id"])
-        ref = services.subjects.put("knowledge_article_draft", article)
-        services.ledger.record(LedgerEntryType.DRAFT_SAVED, actor=Actor(type="agent", id=services.agent_id),
-                               subject_refs=[SubjectRef(type="knowledge_article_draft", id=article.article_id,
-                                                        sha256=subject_digest(article)),
-                                             SubjectRef(type="product_problem", id=article.problem_id)],
-                               payload={"draft_ref": ref, "blocked_claims": len(blocked)})
+        ref = save_draft(services, "knowledge_article_draft", article,
+                         related=[SubjectRef(type="product_problem", id=article.problem_id)],
+                         payload={"blocked_claims": len(blocked)})
         return {"article_ref": ref, "missing": [], "blocked": dump_blocked(blocked)}
 
     def _target(subject: BaseModel) -> dict[str, Any]:
@@ -121,9 +106,7 @@ def build_capture_knowledge(services: Services, llm: LlmNodes) -> Any:
         if verified["overall"] != "PASS":
             return {"status": "verification_" + verified["overall"].lower(), "problems": verified["failed"],
                     "article_ref": assembled["article_ref"]}
-        proposal = await ctx.run_node(tail.propose, verified)
-        await ctx.run_node(tail.await_approval, proposal)
-        outcome = await ctx.run_node(tail.commit, proposal)
+        outcome = await tail.run(ctx, verified)
         return {**outcome, "problem_id": loaded["problem_id"], "article_ref": assembled["article_ref"]}
 
     return capture_knowledge

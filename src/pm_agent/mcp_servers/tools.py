@@ -14,11 +14,11 @@ from typing import Any, TypeVar
 from pm_agent.connectors.base import PollResult
 from pm_agent.connectors.common import checked_limit, decode_offset_cursor, encode_offset_cursor
 from pm_agent.grounding.policy import PolicyEngine
-from pm_agent.grounding.verifier import SUBJECT_TYPES
 from pm_agent.mcp_servers.registry import token_gated
 from pm_agent.mcp_servers.services import ServerServices, required
 from pm_agent.mcp_servers.write_server import WriteToolServer
 from pm_agent.schemas import ClaimDraft, Decision, LedgerEntryType, Signal, VerificationReport
+from pm_agent.schemas.subjects import SUBJECT_TYPES
 
 ToolFn = Callable[..., dict[str, Any]]
 T = TypeVar("T")
@@ -145,6 +145,7 @@ def msgraph_tools(services: ServerServices) -> dict[str, ToolFn]:
 def figma_tools(services: ServerServices) -> dict[str, ToolFn]:
     """``mcp-figma``: DLS catalog search, component metadata, file nodes and rendered screenshots."""
     figma = required(services.figma, "figma", "mcp-figma")
+    required(services.redactor, "redactor", "mcp-figma")  # fail closed if redaction wiring is missing (DM-5)
 
     def search_dls(query: str, top: int = 10) -> dict[str, Any]:
         return {"components": [asdict(c) for c in figma.search_dls(query, checked_limit(top))]}
@@ -168,14 +169,13 @@ def figma_tools(services: ServerServices) -> dict[str, ToolFn]:
 def kb_tools(services: ServerServices) -> dict[str, ToolFn]:
     """``mcp-kb``: KB-first search through the backend-agnostic adapter (hits redacted before return)."""
     kb = required(services.kb, "kb", "mcp-kb")
-    redactor = services.redactor
+    redactor = required(services.redactor, "redactor", "mcp-kb")
 
     def search_articles(query: str, top: int = 10, labels: str | None = None) -> dict[str, Any]:
         filters = {"labels": labels} if labels else None
         hits = [hit.as_dict() for hit in kb.search(query, filters, checked_limit(top))]
-        if redactor is not None:  # outputs are redacted server-side before return (docs/09 §1)
-            for hit in hits:
-                hit["title"], hit["snippet"] = redactor.redact(hit["title"]).text, redactor.redact(hit["snippet"]).text
+        for hit in hits:  # outputs are always redacted server-side before return (docs/09 §1)
+            hit["title"], hit["snippet"] = redactor.redact(hit["title"]).text, redactor.redact(hit["snippet"]).text
         return {"hits": hits}
 
     return {"search_articles": search_articles}

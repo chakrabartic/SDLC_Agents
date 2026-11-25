@@ -19,7 +19,7 @@ import re
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
 from pm_agent.connectors.base import ConnectorError, PollResult, make_signal
 from pm_agent.connectors.common import (
@@ -182,11 +182,19 @@ class GraphApi:
         self._base = base_url.rstrip("/")
 
     @staticmethod
-    def continuation(cursor: str) -> str:
-        """Accept only Graph-issued ``nextLink``/``deltaLink`` URLs as cursors (SSRF guard)."""
+    def continuation(cursor: str, *, expected_path: str | None = None) -> str:
+        """Accept only Graph-issued ``nextLink``/``deltaLink`` URLs bound to this resource (SSRF + confused deputy)."""
         parts = urlsplit(cursor)
-        if parts.scheme != "https" or parts.hostname != GRAPH_HOST or parts.username or parts.port:
+        if parts.scheme != "https" or parts.hostname != GRAPH_HOST or parts.username or parts.port or parts.fragment:
             raise ConnectorError("validation_failed", "cursor is not a Microsoft Graph continuation link")
+        for segment in parts.path.split("/"):
+            decoded = unquote(segment)
+            if segment in (".", "..") or decoded in (".", "..") or "/" in decoded or "\\" in decoded:
+                raise ConnectorError("validation_failed", "cursor path contains a traversal segment")
+        if expected_path is not None:
+            actual, expected = unquote(parts.path), unquote(expected_path)
+            if actual != expected and not actual.startswith(f"{expected}("):
+                raise ConnectorError("validation_failed", "cursor does not belong to the configured Graph resource")
         return cursor
 
     def _user(self, mailbox: str) -> str:
@@ -197,11 +205,11 @@ class GraphApi:
 
     def mail_delta(self, mailbox: str, folder: str, *, page_size: int, cursor: str | None = None) -> HttpRequest:
         headers = {"Prefer": f'odata.maxpagesize={page_size}, outlook.body-content-type="html"'}
+        delta_url = f"{self._user(mailbox)}/mailFolders/{quote(folder, safe='')}/messages/delta"
         if cursor:
-            return HttpRequest(method="GET", url=self.continuation(cursor), headers=headers)
-        folder_url = f"{self._user(mailbox)}/mailFolders/{quote(folder, safe='')}"
-        return HttpRequest(method="GET", url=f"{folder_url}/messages/delta", params=(("$select", MAIL_SELECT),),
-                           headers=headers)
+            return HttpRequest(method="GET", url=self.continuation(cursor, expected_path=urlsplit(delta_url).path),
+                               headers=headers)
+        return HttpRequest(method="GET", url=delta_url, params=(("$select", MAIL_SELECT),), headers=headers)
 
     def message(self, mailbox: str, message_id: str) -> HttpRequest:
         return HttpRequest(method="GET", url=f"{self._user(mailbox)}/messages/{quote(message_id, safe='')}",
@@ -209,10 +217,11 @@ class GraphApi:
 
     def drive_delta(self, drive_id: str, *, page_size: int, cursor: str | None = None) -> HttpRequest:
         headers = {"Prefer": f"odata.maxpagesize={page_size}"}
+        delta_url = f"{self._base}/drives/{quote(drive_id, safe='!')}/root/delta"
         if cursor:
-            return HttpRequest(method="GET", url=self.continuation(cursor), headers=headers)
-        return HttpRequest(method="GET", url=f"{self._base}/drives/{quote(drive_id, safe='!')}/root/delta",
-                           headers=headers)
+            return HttpRequest(method="GET", url=self.continuation(cursor, expected_path=urlsplit(delta_url).path),
+                               headers=headers)
+        return HttpRequest(method="GET", url=delta_url, headers=headers)
 
     def item_content(self, drive_id: str, item_id: str) -> HttpRequest:
         return HttpRequest(method="GET", url=f"{self._drive_item(drive_id, item_id)}/content")

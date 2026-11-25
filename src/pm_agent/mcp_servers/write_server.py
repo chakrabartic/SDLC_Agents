@@ -6,16 +6,15 @@ with truthful annotations (``readOnlyHint=false``). Handlers receive only what t
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from typing import Any
 
-from pm_agent.gateway import ToolCallError
+from pm_agent.gateway import ToolCallError, WriteHandler
 from pm_agent.hitl.catalog import scope_for
 from pm_agent.hitl.tokens import TokenError
 from pm_agent.hitl.write_guard import WriteToolGuard
 
-WriteHandler = Callable[..., dict[str, Any]]
-"""``handler(*, payload, target, validate_only, idempotency_key) -> dict`` (one vendor call)."""
+__all__ = ["WriteHandler", "WriteToolServer"]
 
 
 class WriteToolServer:
@@ -35,9 +34,12 @@ class WriteToolServer:
             raise ToolCallError("not_found", f"{self.name} has no tool {tool}")
         payload = arguments.get("payload")
         validate_only = bool(arguments.get("validate_only", False))
+        action_id = arguments.get("action_id")
+        if not validate_only and not (isinstance(action_id, str) and action_id):
+            raise ToolCallError("unauthorized", "missing action_id")
         try:
             claims = self._guard.authorize(scope=scope_for(self.name, tool), payload=payload,
-                                           token=arguments.get("approval_token"), action_id=arguments.get("action_id"),
+                                           token=arguments.get("approval_token"), action_id=action_id,
                                            validate_only=validate_only)
         except TokenError as exc:
             raise ToolCallError("unauthorized", str(exc)) from exc

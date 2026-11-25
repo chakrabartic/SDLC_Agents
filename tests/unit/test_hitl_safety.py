@@ -276,3 +276,109 @@ def test_token_guard_rejects_tokens_whose_claims_were_widened(hitl) -> None:  # 
         hitl.guard.authorize(scope="ado_write.create_work_item", payload={}, token="a.b.c", action_id="act",
                              validate_only=True)
     assert timedelta(minutes=hitl.settings.hitl.token_ttl_minutes) <= timedelta(minutes=15)
+
+
+# ------------------------------------------------------------------------------------- approver identity (H-2)
+_IAP_AUDIENCE = "/projects/123/global/backendServices/456"
+
+
+class _StaticGroups:
+    def __init__(self, groups: list[str]) -> None:
+        self.groups, self.calls = groups, []  # type: ignore[var-annotated]
+
+    def groups_for(self, subject: str, email: str) -> list[str]:
+        self.calls.append((subject, email))
+        return list(self.groups)
+
+
+def _iap(monkeypatch, claims=None, error=None):  # type: ignore[no-untyped-def]
+    """``IapJwtVerifier`` over a faked ``google.oauth2.id_token.verify_token`` (no network, no IAP keys)."""
+    from google.oauth2 import id_token  # pylint: disable=import-outside-toplevel
+
+    from pm_agent.hitl.identity import IapJwtVerifier  # pylint: disable=import-outside-toplevel
+
+    seen: list[dict[str, object]] = []
+
+    def fake_verify_token(assertion, request, audience=None, certs_url=None):  # type: ignore[no-untyped-def]
+        seen.append({"assertion": assertion, "request": request, "audience": audience, "certs_url": certs_url})
+        if error is not None:
+            raise error
+        return claims
+
+    monkeypatch.setattr(id_token, "verify_token", fake_verify_token)
+    groups = _StaticGroups(["pm_approvers"])
+    return IapJwtVerifier(audience=_IAP_AUDIENCE, group_resolver=groups, request=object()), groups, seen
+
+
+def test_iap_verifier_returns_the_verified_approver_with_resolved_groups(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from pm_agent.hitl.identity import IAP_CERTS_URL, IAP_ISSUER  # pylint: disable=import-outside-toplevel
+
+    verifier, groups, seen = _iap(monkeypatch, {"iss": IAP_ISSUER, "sub": "accounts.google.com:42",
+                                                "email": "pm@slb.test"})
+    approver = verifier.verify("header.claims.signature")
+    assert (approver.sub, approver.email, approver.groups) == ("accounts.google.com:42", "pm@slb.test",
+                                                               ["pm_approvers"])
+    assert approver.idp == "workforce-identity" and groups.calls == [("accounts.google.com:42", "pm@slb.test")]
+    assert seen[0]["audience"] == _IAP_AUDIENCE and seen[0]["certs_url"] == IAP_CERTS_URL
+
+
+@pytest.mark.parametrize("claims", [
+    {"iss": "https://accounts.google.com", "sub": "accounts.google.com:42"},  # not IAP
+    {"iss": "https://cloud.google.com/iap", "sub": ""},
+    {"iss": "https://cloud.google.com/iap", "sub": "   "},
+    {"iss": "https://cloud.google.com/iap", "sub": None},
+    {"iss": "https://cloud.google.com/iap"},
+])
+def test_iap_verifier_rejects_foreign_issuers_and_assertions_without_a_subject(monkeypatch, claims) -> None:  # type: ignore[no-untyped-def]
+    from pm_agent.hitl.identity import IdentityError  # pylint: disable=import-outside-toplevel
+
+    verifier, groups, _ = _iap(monkeypatch, claims)
+    with pytest.raises(IdentityError):
+        verifier.verify("header.claims.signature")
+    assert groups.calls == []  # no group lookup for an unauthenticated caller
+
+
+def test_iap_verifier_maps_any_verification_failure_to_identity_error(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from pm_agent.hitl.identity import IdentityError  # pylint: disable=import-outside-toplevel
+
+    verifier, _, _ = _iap(monkeypatch, error=ValueError("Token expired"))
+    with pytest.raises(IdentityError, match="rejected"):
+        verifier.verify("header.claims.signature")
+
+
+def test_placeholder_group_resolver_names_its_open_question() -> None:
+    from pm_agent.hitl.identity import PlaceholderGroupResolver  # pylint: disable=import-outside-toplevel
+    from pm_agent.placeholders import PlaceholderNotImplemented  # pylint: disable=import-outside-toplevel
+
+    with pytest.raises(PlaceholderNotImplemented) as blocked:
+        PlaceholderGroupResolver().groups_for("sub", "email")
+    assert blocked.value.question_id == "Q-08"
+
+
+def test_empty_subject_assertions_are_unauthenticated(hitl) -> None:  # type: ignore[no-untyped-def]
+    from pm_agent.hitl.identity import IdentityError  # pylint: disable=import-outside-toplevel
+
+    nobody = PM.model_copy(update={"sub": ""})
+    with pytest.raises(IdentityError):
+        hitl.identities.verify(hitl.identities.issue(nobody))
+    action = hitl.propose_ado()
+    with pytest.raises(ApprovalError) as refused:
+        hitl.approvals.decide(action_id=action.action_id, decision=Decision.APPROVE,
+                              assertion=hitl.identities.issue(nobody))
+    assert _code(refused) == "unauthenticated"
+    assert not hitl.ledger.query(entry_types=[LedgerEntryType.DECISION_RECORDED])
+
+
+def test_local_assertions_fail_closed_when_expired_foreign_or_malformed(hitl) -> None:  # type: ignore[no-untyped-def]
+    from pm_agent.hitl.identity import IdentityError, LocalIdentityVerifier  # pylint: disable=import-outside-toplevel
+
+    assertion = hitl.identities.issue(PM, ttl_seconds=60)
+    assert hitl.identities.verify(assertion).sub == PM.sub
+    foreign = LocalIdentityVerifier(LocalEcdsaSigner(key_id="iap-test"), audience="another-app", clock=hitl.clock)
+    rejected = [foreign.issue(PM), "no-dot", "a.b.c", assertion + "x", assertion.replace(".", "!.")]
+    for candidate in rejected:
+        with pytest.raises(IdentityError):
+            hitl.identities.verify(candidate)
+    hitl.clock.advance(seconds=61)
+    with pytest.raises(IdentityError):
+        hitl.identities.verify(assertion)

@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import json
 
-from pm_agent.grounding.verifier import subject_digest
 from pm_agent.schemas import PrototypeSpec, SpecNode
+from pm_agent.schemas.subjects import subject_digest
 
 PLACEHOLDER_FONT = {"family": "Inter", "style": "Regular"}  # PLACEHOLDER:Q-03:dls_font_family
 

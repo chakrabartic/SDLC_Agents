@@ -115,3 +115,12 @@ class EmbeddingScorer:
         dot = sum(x * y for x, y in zip(va, vb))
         norm = math.sqrt(sum(x * x for x in va)) * math.sqrt(sum(y * y for y in vb))
         return round(min((dot / norm if norm else 0.0) + _boost(a, b), 0.99), 4), "embedding similarity"
+
+
+def make_scorer(settings: Settings, atoms: AtomExtractor) -> SimilarityScorer:
+    """``correlation.scoring``: ``embedding`` (gemini-embedding, needs ADC) or ``lexical`` (offline reference)."""
+    if settings.correlation.scoring == "embedding":
+        from pm_agent.settings import make_genai_client  # pylint: disable=import-outside-toplevel
+
+        return EmbeddingScorer(settings, make_genai_client(settings))
+    return LexicalScorer(settings, atoms)

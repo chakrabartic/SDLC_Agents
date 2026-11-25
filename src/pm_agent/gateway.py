@@ -13,7 +13,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, Protocol
 
-from pm_agent.placeholders import not_implemented
+from pydantic import ValidationError
+
+from pm_agent.placeholders import PlaceholderError, PlaceholderNotImplemented, not_implemented
 
 
 class ToolCallError(Exception):
@@ -30,8 +32,38 @@ class ToolServer(Protocol):
     def call(self, tool: str, arguments: dict[str, Any]) -> dict[str, Any]: ...
 
 
+class WriteHandler(Protocol):
+    """One vendor write behind a token-gated write server (docs/07 §6, docs/09 §1).
+
+    Called only after the server verified the approval token for this exact tool, payload and action; ``target`` is
+    the approved ``tgt`` claim and ``idempotency_key`` the action id. Keyword-only so every handler is type-checked.
+    """
+
+    def __call__(self, *, payload: Any, target: dict[str, Any], validate_only: bool,
+                 idempotency_key: str) -> dict[str, Any]: ...
+
+
 class ToolGateway(Protocol):
     def call(self, server: str, tool: str, arguments: dict[str, Any]) -> dict[str, Any]: ...
+
+
+def _translate_server_error(exc: Exception) -> ToolCallError | None:
+    """Translate anticipated in-process server errors into typed ``ToolCallError`` (never echo content).
+
+    Mirrors ``pm_agent.mcp_servers.factory.typed_errors`` without importing connectors or HITL modules (keeps
+    ``gateway`` cycle-free below every server and connector package). Unanticipated errors return ``None`` and escape.
+    """
+    if isinstance(exc, PlaceholderError):
+        detail = f"awaiting {exc.question_id}" if isinstance(exc, PlaceholderNotImplemented) else type(exc).__name__
+        return ToolCallError("unavailable", detail)
+    if isinstance(exc, LookupError):
+        return ToolCallError("not_found", type(exc).__name__)
+    if isinstance(exc, (ValidationError, ValueError, TypeError)):
+        return ToolCallError("validation_failed", type(exc).__name__)
+    code = getattr(exc, "code", None)
+    if isinstance(code, str) and type(exc).__module__.startswith("pm_agent."):
+        return ToolCallError(code, type(exc).__name__)
+    return None
 
 
 class InProcessToolGateway:
@@ -39,10 +71,19 @@ class InProcessToolGateway:
         self._servers = dict(servers)
 
     def call(self, server: str, tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        """Dispatch to an in-process server and translate anticipated errors into typed ``ToolCallError``s."""
         target = self._servers.get(server)
         if target is None:
             raise ToolCallError("not_found", f"no route to server {server}")
-        return target.call(tool, arguments)
+        try:
+            return target.call(tool, arguments)
+        except ToolCallError:
+            raise
+        except Exception as exc:  # pylint: disable=broad-exception-caught  # translate anticipated server errors only
+            translated = _translate_server_error(exc)
+            if translated is not None:
+                raise translated from exc
+            raise
 
 
 class McpGatewayClient:

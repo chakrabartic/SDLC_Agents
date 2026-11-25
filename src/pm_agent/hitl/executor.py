@@ -13,7 +13,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any
 
 from pm_agent.gateway import ToolCallError, ToolGateway
 from pm_agent.grounding.verifier import Verifier
@@ -21,19 +21,17 @@ from pm_agent.hitl.approvals import ApprovalError, ApprovalService, IssuedToken
 from pm_agent.hitl.catalog import ActionCatalog, ActionSpec
 from pm_agent.hitl.subjects import SubjectStore
 from pm_agent.hitl.tokens import TokenError, verify_token
-from pm_agent.schemas import ApprovalTokenClaims, ProposedAction, VerificationOutcome, utcnow
+from pm_agent.schemas import (
+    ApprovalTokenClaims,
+    CommitOutcome,
+    CommitResult,
+    ProposedAction,
+    VerificationOutcome,
+    utcnow,
+)
 from pm_agent.settings import Settings
 
-Outcome = Literal["committed", "refused", "failed", "changes_requested"]
-
-
-@dataclass(frozen=True)
-class CommitResult:
-    action_id: str
-    outcome: Outcome
-    external_ref: dict[str, str] | None = None
-    error: str | None = None
-
+__all__ = ["CommitAborted", "CommitContext", "CommitExecutor", "CommitResult", "ReadBack"]
 
 class CommitAborted(Exception):
     """Raised by a step to stop the commit; ``changes_requested`` sends the draft back to the PM."""
@@ -80,14 +78,20 @@ class CommitExecutor:  # pylint: disable=too-many-instance-attributes
             self.consume_token(ctx)
         except ApprovalError as exc:
             return CommitResult(action_id=action_id, outcome="refused", error=exc.code)
+        wrote = False
         try:
             self.verify_token(ctx)
             self.reverify(ctx)
             self.preflight(ctx)
+            wrote = True
             self.execute_write(ctx)
             self.read_back(ctx)
         except CommitAborted as abort:
             return self.record_failure(ctx, abort)
+        except Exception as exc:  # pylint: disable=broad-exception-caught  # no silent exit after token consumption
+            # Never echo exception messages into the ledger (they may carry content); type names only (docs/07 §9).
+            prefix = "write outcome unknown" if wrote else "preflight error"
+            return self.record_failure(ctx, CommitAborted(f"{prefix}: {type(exc).__name__}"))
         return self.record_success(ctx)
 
     # ------------------------------------------------------------------------------------------------ steps
@@ -160,5 +164,5 @@ class CommitExecutor:  # pylint: disable=too-many-instance-attributes
         self._approvals.record_commit(action_id=ctx.action.action_id, actor_id=ctx.executor_id, succeeded=False,
                                       error=abort.error, changes_requested=abort.changes_requested,
                                       report_id=ctx.report_id)
-        outcome: Outcome = "changes_requested" if abort.changes_requested else "failed"
+        outcome: CommitOutcome = "changes_requested" if abort.changes_requested else "failed"
         return CommitResult(action_id=ctx.action.action_id, outcome=outcome, error=abort.error)

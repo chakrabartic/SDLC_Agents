@@ -1,0 +1,460 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1190" viewBox="0 0 1800 1190" font-family="'Google Sans', Roboto, 'Helvetica Neue', Helvetica, Arial, sans-serif">
+  <title>SLB Intelligent Product Orchestration — PM Agent · Production Architecture</title>
+  <defs>
+    <marker id="aBlue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#1A73E8"/></marker>
+    <marker id="aRed" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#D93025"/></marker>
+    <marker id="aAmber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#E37400"/></marker>
+    <marker id="aIndigo" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#3949AB"/></marker>
+    <marker id="aPurple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#9334E6"/></marker>
+    <marker id="aGray" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#5F6368"/></marker>
+    <style>
+      .title{font-size:22px;font-weight:700;fill:#202124}
+      .subtitle{font-size:12.5px;fill:#5F6368}
+      .h{font-size:12px;font-weight:700;fill:#202124;letter-spacing:0.4px}
+      .h2{font-size:11px;font-weight:700;fill:#202124}
+      .gt{font-size:10px;font-weight:700;fill:#174EA6}
+      .b{font-size:10.5px;fill:#3C4043}
+      .s{font-size:10px;fill:#5F6368}
+      .badge{font-size:9px;font-weight:700;fill:#FFFFFF;letter-spacing:0.3px}
+      .num{font-size:10px;font-weight:700;fill:#FFFFFF}
+      .mono{font-family:'Roboto Mono', Menlo, Consolas, monospace;font-size:9.5px;fill:#00695C}
+      .blue{stroke:#1A73E8;stroke-width:2;fill:none}
+      .red{stroke:#D93025;stroke-width:2.2;fill:none}
+      .redDash{stroke:#D93025;stroke-width:2;fill:none;stroke-dasharray:6 4}
+      .amber{stroke:#E37400;stroke-width:2;fill:none;stroke-dasharray:7 4}
+      .amberSolid{stroke:#E37400;stroke-width:2.2;fill:none}
+      .indigo{stroke:#3949AB;stroke-width:2;fill:none}
+      .purple{stroke:#9334E6;stroke-width:1.8;fill:none;stroke-dasharray:6 4}
+      .gray{stroke:#80868B;stroke-width:1.4;fill:none}
+    </style>
+  </defs>
+
+  <rect width="1800" height="1190" fill="#FFFFFF"/>
+
+  <!-- ============ TITLE ============ -->
+  <text x="20" y="36" class="title">SLB Intelligent Product Orchestration — PM Agent · Production Architecture</text>
+  <text x="20" y="60" class="subtitle">Google Cloud agentic stack · ADK 2.15 graph workflows · A2UI v1.0 · Agent Runtime + Agent Gateway + Agent Identity (SPIFFE) · Cloud Run · GKE Autopilot · Gemini via google-genai (enterprise=True)</text>
+  <rect x="1556" y="20" width="224" height="24" rx="12" fill="#FEF7E0" stroke="#F9AB00"/>
+  <text x="1668" y="36" class="h2" text-anchor="middle" fill="#B06000">Spec v1.1 · G2 approved · 2026-11-24</text>
+
+  <!-- ============ PEOPLE ============ -->
+  <text x="20" y="98" class="h">PEOPLE</text>
+  <rect x="20" y="110" width="210" height="56" rx="8" fill="#FFFFFF" stroke="#202124" stroke-width="1.2"/>
+  <text x="32" y="132" class="h2">Product Manager / Champion</text>
+  <text x="32" y="150" class="s">approves every external write</text>
+  <rect x="20" y="176" width="210" height="56" rx="8" fill="#FFFFFF" stroke="#202124" stroke-width="1.2"/>
+  <text x="32" y="198" class="h2">UX / Design</text>
+  <text x="32" y="216" class="s">prototype plan &amp; render review</text>
+  <rect x="20" y="242" width="210" height="56" rx="8" fill="#FFFFFF" stroke="#202124" stroke-width="1.2"/>
+  <text x="32" y="264" class="h2">Engineering</text>
+  <text x="32" y="282" class="s">feasibility &amp; plan review</text>
+  <rect x="20" y="308" width="210" height="56" rx="8" fill="#FFFFFF" stroke="#202124" stroke-width="1.2"/>
+  <text x="32" y="330" class="h2">Governance / Security</text>
+  <text x="32" y="348" class="s">ledger &amp; policy audit</text>
+  <path class="gray" d="M230,138 L238,138 M230,204 L238,204 M230,270 L238,270 M230,336 L238,336 M238,138 L238,336"/>
+  <path class="gray" d="M238,165 L277,165" marker-end="url(#aGray)"/>
+
+  <!-- ============ PERIMETER ============ -->
+  <rect x="250" y="84" width="1238" height="962" rx="16" fill="#F8F9FA" stroke="#5F6368" stroke-width="1.5" stroke-dasharray="8 5"/>
+  <text x="266" y="102" class="s" font-weight="700">GOOGLE CLOUD · VPC SERVICE CONTROLS PERIMETER · us-central1 · CMEK</text>
+
+  <!-- ============ ROW A: EXPERIENCE & INGRESS ============ -->
+  <rect x="280" y="110" width="250" height="110" rx="10" fill="#E6F4EA" stroke="#188038" stroke-width="1.5"/>
+  <text x="292" y="130" class="h">PM WORKBENCH</text>
+  <text x="292" y="146" class="s">Cloud Run · IAP · Workforce IdF (SLB SSO)</text>
+  <text x="292" y="164" class="b">A2UI v1.0 renderer (Angular) + BFF</text>
+  <text x="292" y="180" class="b">SLB catalog: CitationChip · ApprovalCard</text>
+  <text x="292" y="195" class="b">EvidencePanel · TraceGraph · DiffView</text>
+  <text x="292" y="211" class="s">a2ui-adk 0.3 · a2ui-a2a 0.4 · A2A (SSE)</text>
+
+  <rect x="560" y="110" width="230" height="110" rx="10" fill="#E0F2F1" stroke="#00796B" stroke-width="1.5"/>
+  <text x="572" y="130" class="h" fill="#00695C">AGENT GATEWAY · INGRESS</text>
+  <text x="572" y="146" class="s">Client-to-Agent (Agent Runtime only)</text>
+  <text x="572" y="164" class="b">Model Armor: injection · jailbreak</text>
+  <text x="572" y="180" class="b">PM credentials pass-through</text>
+  <text x="572" y="196" class="b">A2A + A2UI extension v1.0</text>
+  <text x="572" y="211" class="s">application/a2ui+json DataParts</text>
+
+  <rect x="820" y="110" width="180" height="110" rx="10" fill="#FFFFFF" stroke="#5F6368" stroke-width="1.3"/>
+  <text x="832" y="130" class="h">SCHEDULER · PUB/SUB</text>
+  <text x="832" y="148" class="s">Cloud Scheduler: delta windows</text>
+  <text x="832" y="164" class="s">Pub/Sub: signal-change-hints</text>
+  <text x="832" y="180" class="s">ids only; data re-read via MCP</text>
+  <text x="832" y="198" class="b">triggers signal-ingestion</text>
+
+  <rect x="1220" y="110" width="250" height="110" rx="10" fill="#F3E8FD" stroke="#9334E6" stroke-width="1.5"/>
+  <text x="1232" y="130" class="h" fill="#7627BB">SIGNAL-EVENT-GATEWAY</text>
+  <text x="1232" y="146" class="s">GKE Autopilot · HTTPS LB · Cloud Armor</text>
+  <text x="1232" y="164" class="b">verifies vendor webhook signatures</text>
+  <text x="1232" y="180" class="b">ADO · ServiceNow · PagerDuty · Graph</text>
+  <text x="1232" y="196" class="b">publishes hints (ids only) → Pub/Sub</text>
+  <text x="1232" y="211" class="s">no outbound SaaS calls</text>
+
+  <!-- ============ ROW B: AGENT RUNTIME ============ -->
+  <rect x="280" y="245" width="720" height="367" rx="12" fill="#E8F0FE" stroke="#1A73E8" stroke-width="1.8"/>
+  <text transform="translate(299,600) rotate(-90)" class="h2" fill="#1A73E8">AGENT RUNTIME · Gemini Enterprise Agent Platform</text>
+
+  <rect x="310" y="262" width="300" height="60" rx="8" fill="#FFFFFF" stroke="#8AB4F8" stroke-width="1.2" stroke-dasharray="4 3"/>
+  <text x="322" y="281" class="h2">Agent Platform Sessions · Memory Bank</text>
+  <text x="322" y="297" class="b">Memory Bank: PM preferences only</text>
+  <text x="322" y="313" class="s">never citable evidence (DM-6)</text>
+
+  <rect x="625" y="262" width="360" height="60" rx="8" fill="#FFFFFF" stroke="#1A73E8" stroke-width="1.5"/>
+  <text x="637" y="279" class="h2">signal-ingestion</text>
+  <rect x="848" y="268" width="131" height="15" rx="7" fill="#1A73E8"/>
+  <text x="913.5" y="279" class="badge" text-anchor="middle">AID-INGEST · READ-ONLY</text>
+  <text x="637" y="297" class="b">Signal Ingestion &amp; Normalization · zero/low-LLM workflow</text>
+  <text x="637" y="313" class="s">poll sources ‖ JoinNode → dedup → persist → assign</text>
+
+  <rect x="310" y="332" width="675" height="200" rx="10" fill="#FFFFFF" stroke="#1A73E8" stroke-width="1.5"/>
+  <text x="322" y="350" class="h">pm-agent-core</text>
+  <rect x="778" y="338" width="201" height="15" rx="7" fill="#1A73E8"/>
+  <text x="878.5" y="349" class="badge" text-anchor="middle">AID-CORE · SPIFFE · READ-ONLY TOOLS</text>
+
+  <rect x="322" y="360" width="651" height="40" rx="7" fill="#D2E3FC" stroke="#1A73E8" stroke-width="1.2"/>
+  <text x="334" y="376" class="h2" fill="#174EA6">PM Orchestrator</text>
+  <text x="440" y="376" class="s">supervisor — deterministic dispatch, no free LLM transfers</text>
+  <text x="334" y="392" class="s">ADK dynamic workflow @node(rerun_on_resume) · intent_router (3.5 Flash-Lite) · hosts RequestInput HITL pauses · resumable</text>
+
+  <rect x="322" y="406" width="211" height="52" rx="7" fill="#FFFFFF" stroke="#8AB4F8" stroke-width="1.2"/>
+  <text x="332" y="422" class="gt">Correlation / Problem Builder</text>
+  <text x="332" y="437" class="s">candidates → score → adjudicate</text>
+  <text x="332" y="451" class="s">aggregates by code · cited claims</text>
+
+  <rect x="542" y="406" width="211" height="52" rx="7" fill="#FFFFFF" stroke="#8AB4F8" stroke-width="1.2"/>
+  <text x="552" y="422" class="gt">Requirement Drafting &amp; Feasibility</text>
+  <text x="552" y="437" class="s">readiness · questions · SLB template</text>
+  <text x="552" y="451" class="s">feasibility (advisory) · RequestInput</text>
+
+  <rect x="762" y="406" width="211" height="52" rx="7" fill="#FFFFFF" stroke="#8AB4F8" stroke-width="1.2"/>
+  <text x="772" y="422" class="gt">Prototype (UX) — planner</text>
+  <text x="772" y="437" class="s">brief → DLS-only PrototypeSpec</text>
+  <text x="772" y="451" class="s">reuse ratio · new patterns justified</text>
+
+  <rect x="322" y="464" width="211" height="52" rx="7" fill="#FFFFFF" stroke="#8AB4F8" stroke-width="1.2"/>
+  <text x="332" y="480" class="gt">Operations</text>
+  <text x="332" y="495" class="s">KB-first · investigation pack</text>
+  <text x="332" y="509" class="s">outcome classified · PM confirms</text>
+
+  <rect x="542" y="464" width="211" height="52" rx="7" fill="#FFFFFF" stroke="#8AB4F8" stroke-width="1.2"/>
+  <text x="552" y="480" class="gt">Knowledge &amp; Roadmap</text>
+  <text x="552" y="495" class="s">KB drafts · trace links (proposed)</text>
+  <text x="552" y="509" class="s">trends — advisory only (GOV3)</text>
+
+  <rect x="762" y="464" width="211" height="52" rx="7" fill="#E8EAF6" stroke="#3949AB" stroke-width="1.2"/>
+  <text x="772" y="480" class="gt" fill="#283593">GroundingGuard plugin</text>
+  <text x="772" y="495" class="s">tool allow-list · content-as-data</text>
+  <text x="772" y="509" class="s">claim-structured output · Model Armor</text>
+
+  <rect x="625" y="542" width="360" height="58" rx="8" fill="#FFFFFF" stroke="#D93025" stroke-width="1.6"/>
+  <text x="637" y="559" class="h2">commit-executor</text>
+  <rect x="810" y="547" width="169" height="15" rx="7" fill="#D93025"/>
+  <text x="894.5" y="558" class="badge" text-anchor="middle">AID-COMMIT · WRITE TOOLS ONLY</text>
+  <text x="637" y="576" class="b">HITL execution arm · zero-LLM · A2A from core</text>
+  <text x="637" y="592" class="s">consume token → re-verify → validateOnly → write → read-back</text>
+
+  <!-- ============ AGENT GATEWAY EGRESS (vertical) ============ -->
+  <rect x="1030" y="245" width="160" height="540" rx="12" fill="#E0F2F1" stroke="#00796B" stroke-width="1.8"/>
+  <text x="1110" y="266" class="h" fill="#00695C" text-anchor="middle">AGENT GATEWAY</text>
+  <text x="1110" y="281" class="s" text-anchor="middle">Egress · Agent-to-Anywhere</text>
+  <line x1="1044" y1="292" x2="1176" y2="292" stroke="#80CBC4"/>
+  <text x="1110" y="310" class="h2" text-anchor="middle">Agent Identity</text>
+  <text x="1110" y="324" class="s" text-anchor="middle">SPIFFE · mTLS + DPoP</text>
+  <text x="1110" y="346" class="h2" text-anchor="middle">Agent Registry</text>
+  <text x="1110" y="360" class="s" text-anchor="middle">MCP servers · agents ·</text>
+  <text x="1110" y="373" class="s" text-anchor="middle">endpoints (allow-list)</text>
+  <text x="1110" y="395" class="h2" text-anchor="middle">IAM Unified Access</text>
+  <text x="1110" y="409" class="h2" text-anchor="middle">Policies</text>
+  <text x="1110" y="423" class="mono" text-anchor="middle">roles/iap.egressor</text>
+  <text x="1110" y="437" class="mono" text-anchor="middle">CEL mcp.toolName</text>
+  <text x="1110" y="451" class="mono" text-anchor="middle">mcp.tool.isReadOnly</text>
+  <text x="1110" y="473" class="h2" text-anchor="middle">Principal Access</text>
+  <text x="1110" y="487" class="h2" text-anchor="middle">Boundary</text>
+  <text x="1110" y="509" class="h2" text-anchor="middle">Model Armor</text>
+  <text x="1110" y="523" class="s" text-anchor="middle">tool payloads · leakage</text>
+  <text x="1110" y="545" class="h2" text-anchor="middle">Semantic Governance</text>
+  <text x="1110" y="559" class="s" text-anchor="middle">(Preview · advisory)</text>
+  <text x="1110" y="581" class="h2" text-anchor="middle">Auth Manager</text>
+  <text x="1110" y="595" class="s" text-anchor="middle">OAuth to tools</text>
+  <line x1="1044" y1="610" x2="1176" y2="610" stroke="#80CBC4"/>
+  <text x="1110" y="632" class="h" fill="#C5221F" text-anchor="middle">DENY BY DEFAULT</text>
+  <text x="1110" y="650" class="s" text-anchor="middle">dry-run → enforce</text>
+  <text x="1110" y="664" class="s" text-anchor="middle">policies via Terraform / CI</text>
+  <line x1="1044" y1="680" x2="1176" y2="680" stroke="#80CBC4"/>
+  <text x="1110" y="700" class="s" text-anchor="middle">telemetry →</text>
+  <text x="1110" y="714" class="s" text-anchor="middle">Agent Observability</text>
+  <text x="1110" y="728" class="s" text-anchor="middle">Cloud Trace · Logging</text>
+  <text x="1110" y="752" class="s" text-anchor="middle">every agent tool call</text>
+  <text x="1110" y="766" class="s" text-anchor="middle">passes here</text>
+
+  <!-- ============ TOOL PLANE (Cloud Run) ============ -->
+  <rect x="1220" y="245" width="250" height="395" rx="12" fill="#E6F4EA" stroke="#188038" stroke-width="1.8"/>
+  <text x="1232" y="264" class="h" fill="#137333">TOOL PLANE · CLOUD RUN</text>
+  <text x="1232" y="278" class="s">MCP servers = agent functions</text>
+
+  <rect x="1232" y="288" width="226" height="110" rx="8" fill="#FFFFFF" stroke="#1A73E8" stroke-width="1.3"/>
+  <text x="1242" y="305" class="h2" fill="#1967D2">READ SERVERS</text>
+  <text x="1242" y="320" class="b">mcp-ado · mcp-servicenow</text>
+  <text x="1242" y="334" class="b">mcp-pagerduty · mcp-msgraph</text>
+  <text x="1242" y="348" class="b">mcp-kb · mcp-figma</text>
+  <text x="1242" y="364" class="s">read-scoped creds · readOnlyHint</text>
+  <text x="1242" y="378" class="s">server-side SDP redaction</text>
+  <text x="1242" y="392" class="s">canonical Signals + permalinks</text>
+
+  <rect x="1232" y="406" width="226" height="98" rx="8" fill="#FFFFFF" stroke="#D93025" stroke-width="1.5"/>
+  <text x="1242" y="423" class="h2" fill="#C5221F">WRITE SERVERS · TOKEN REQUIRED</text>
+  <text x="1242" y="438" class="b">mcp-ado-write (validateOnly first)</text>
+  <text x="1242" y="452" class="b">mcp-kb-write · mcp-figma-write</text>
+  <text x="1242" y="466" class="b">mcp-msgraph-write (internal only)</text>
+  <text x="1242" y="482" class="s">write-scoped creds · AID-COMMIT only</text>
+  <text x="1242" y="496" class="s">verify JWS: aud · exp · scp · pah</text>
+
+  <rect x="1232" y="512" width="226" height="118" rx="8" fill="#FFFFFF" stroke="#3949AB" stroke-width="1.3"/>
+  <text x="1242" y="529" class="h2" fill="#283593">INTERNAL SERVICES</text>
+  <text x="1242" y="544" class="b">mcp-store · evidence · drafts</text>
+  <text x="1242" y="558" class="b">mcp-verifier · mcp-ledger</text>
+  <text x="1242" y="572" class="b">svc-prototype-renderer</text>
+  <text x="1242" y="588" class="s">Spec → Plugin-API program</text>
+  <text x="1242" y="602" class="s">(token-gated, deterministic)</text>
+  <text x="1242" y="618" class="s">IAP-protected MCP (Preview)</text>
+
+  <!-- ============ GKE DATA PLANE ============ -->
+  <rect x="1220" y="650" width="250" height="135" rx="12" fill="#F3E8FD" stroke="#9334E6" stroke-width="1.8"/>
+  <text x="1232" y="669" class="h" fill="#7627BB">GKE AUTOPILOT · DATA PLANE</text>
+  <text x="1232" y="686" class="b">correlation-engine (mcp-correlation)</text>
+  <text x="1232" y="700" class="s">ANN index · HDBSCAN re-cluster CronJob</text>
+  <text x="1232" y="718" class="b">dls-catalog-sync (CronJob)</text>
+  <text x="1232" y="732" class="s">SLB DLS via Figma REST (plan token)</text>
+  <text x="1232" y="750" class="b">signal-event-gateway (top)</text>
+  <text x="1232" y="764" class="s">webhooks → Pub/Sub hints</text>
+
+  <!-- ============ ROW C: GATES ============ -->
+  <rect x="280" y="640" width="320" height="145" rx="12" fill="#E8EAF6" stroke="#3949AB" stroke-width="1.8"/>
+  <text x="292" y="659" class="h" fill="#283593">GROUNDING / VERIFIER LAYER</text>
+  <text x="292" y="674" class="s">mcp-verifier (Cloud Run) · deterministic · via egress</text>
+  <text x="292" y="692" class="b">V0 schema · V1 citation present · V2 resolvable</text>
+  <text x="292" y="707" class="b">V3 exact span · V4 atoms · V6 aggregates recomputed</text>
+  <text x="292" y="722" class="s">V5 bounded entailment judge (quotes only, fail-closed)</text>
+  <text x="292" y="737" class="b">V7 inference quarantine · V8 SDP redaction</text>
+  <text x="292" y="752" class="s">V9 policy (audience · DLS reuse) · V10 near-duplicates</text>
+  <text x="292" y="772" class="s" font-weight="700" fill="#283593">⇒ KMS-signed VerificationReport, content-hash bound</text>
+
+  <rect x="620" y="640" width="380" height="145" rx="12" fill="#FEF3E0" stroke="#E37400" stroke-width="1.8"/>
+  <text x="632" y="659" class="h" fill="#B06000">HITL APPROVAL &amp; AUDIT LEDGER</text>
+  <text x="632" y="674" class="s">mcp-ledger (Cloud Run) · Cloud KMS · AlloyDB · via egress</text>
+  <text x="632" y="692" class="b">propose → PM decides in Workbench (IAP identity, not via LLM)</text>
+  <text x="632" y="707" class="b">ES256 token: action · payload hash · scope · 15 min · 1 use</text>
+  <text x="632" y="722" class="b">closed action catalog · deny by default · proposal TTL 72 h</text>
+  <text x="632" y="737" class="b">append-only SHA-256 chain · anchors → locked log bucket</text>
+  <text x="632" y="752" class="b">commit only by commit-executor after atomic token consume</text>
+  <text x="632" y="772" class="s" font-weight="700" fill="#B06000">⇒ immutable, queryable audit of every draft · approval · commit</text>
+
+  <!-- ============ ROW D: DATA & AI SERVICES ============ -->
+  <rect x="280" y="805" width="1190" height="150" rx="12" fill="#FFFFFF" stroke="#5F6368" stroke-width="1.4"/>
+  <text x="292" y="823" class="h">DATA &amp; AI SERVICES · private · CMEK</text>
+
+  <g>
+    <rect x="292" y="834" width="124" height="110" rx="8" fill="#F8F9FA" stroke="#BDC1C6"/><rect x="292" y="834" width="124" height="6" rx="3" fill="#1A73E8"/>
+    <text x="302" y="856" class="h2">AlloyDB AI</text>
+    <text x="302" y="872" class="s">evidence store</text><text x="302" y="886" class="s">pgvector · ScaNN</text>
+    <text x="302" y="900" class="s">problems · drafts</text><text x="302" y="914" class="s">ledger (insert-only)</text>
+
+    <rect x="422" y="834" width="124" height="110" rx="8" fill="#F8F9FA" stroke="#BDC1C6"/><rect x="422" y="834" width="124" height="6" rx="3" fill="#1A73E8"/>
+    <text x="432" y="856" class="h2">Cloud Storage</text>
+    <text x="432" y="872" class="s">artifacts by handle</text><text x="432" y="886" class="s">Bucket-Locked</text>
+    <text x="432" y="900" class="s">ledger exports</text>
+
+    <rect x="552" y="834" width="124" height="110" rx="8" fill="#F8F9FA" stroke="#BDC1C6"/><rect x="552" y="834" width="124" height="6" rx="3" fill="#1A73E8"/>
+    <text x="562" y="856" class="h2">BigQuery</text>
+    <text x="562" y="872" class="s">analytics · trends</text><text x="562" y="886" class="s">KPIs · eval results</text>
+    <text x="562" y="900" class="s">ledger mirror</text>
+
+    <rect x="682" y="834" width="124" height="110" rx="8" fill="#F8F9FA" stroke="#BDC1C6"/><rect x="682" y="834" width="124" height="6" rx="3" fill="#9334E6"/>
+    <text x="692" y="856" class="h2">Pub/Sub</text>
+    <text x="692" y="872" class="s">change hints</text><text x="692" y="886" class="s">signal-ingested</text>
+    <text x="692" y="900" class="s">ledger-events</text>
+
+    <rect x="812" y="834" width="124" height="110" rx="8" fill="#F8F9FA" stroke="#BDC1C6"/><rect x="812" y="834" width="124" height="6" rx="3" fill="#E37400"/>
+    <text x="822" y="856" class="h2">Cloud Logging</text>
+    <text x="822" y="872" class="s">locked bucket</text><text x="822" y="886" class="s">ledger anchors</text>
+    <text x="822" y="900" class="s">audit logs</text>
+
+    <rect x="942" y="834" width="124" height="110" rx="8" fill="#F8F9FA" stroke="#BDC1C6"/><rect x="942" y="834" width="124" height="6" rx="3" fill="#E37400"/>
+    <text x="952" y="856" class="h2">Cloud KMS</text>
+    <text x="952" y="872" class="s">token signer (ES256)</text><text x="952" y="886" class="s">report signer</text>
+    <text x="952" y="900" class="s">CMEK keys</text>
+
+    <rect x="1072" y="834" width="124" height="110" rx="8" fill="#F8F9FA" stroke="#BDC1C6"/><rect x="1072" y="834" width="124" height="6" rx="3" fill="#3949AB"/>
+    <text x="1082" y="856" class="h2">Sensitive Data</text>
+    <text x="1082" y="870" class="h2">Protection</text>
+    <text x="1082" y="886" class="s">de-identify</text><text x="1082" y="900" class="s">inspect</text>
+    <text x="1082" y="914" class="s">pseudonymize (det.)</text>
+
+    <rect x="1202" y="834" width="124" height="110" rx="8" fill="#F8F9FA" stroke="#BDC1C6"/><rect x="1202" y="834" width="124" height="6" rx="3" fill="#5F6368"/>
+    <text x="1212" y="856" class="h2">Secret Manager</text>
+    <text x="1212" y="872" class="s">3P credentials</text><text x="1212" y="886" class="s">per-server IAM</text>
+    <text x="1212" y="900" class="s">rotation</text>
+
+    <rect x="1332" y="834" width="124" height="110" rx="8" fill="#F8F9FA" stroke="#BDC1C6"/><rect x="1332" y="834" width="124" height="6" rx="3" fill="#188038"/>
+    <text x="1342" y="856" class="h2">Gemini models</text>
+    <text x="1342" y="872" class="s">google-genai</text><text x="1342" y="886" class="mono">enterprise=True</text>
+    <text x="1342" y="900" class="s">3.8 Flash</text><text x="1342" y="914" class="s">3.5 Flash-Lite</text>
+    <text x="1342" y="928" class="s">embedding-2</text>
+  </g>
+
+  <!-- ============ ROW E: OPS ============ -->
+  <rect x="280" y="968" width="1190" height="68" rx="12" fill="#F1F3F4" stroke="#5F6368" stroke-width="1.4"/>
+  <text x="292" y="987" class="h">OPS &amp; DELIVERY</text>
+  <text x="292" y="1006" class="b">Cloud Trace · Agent Observability · Cloud Logging &amp; Monitoring (SLOs, KPIs) · BigQuery Agent Analytics plugin · Artifact Registry · Binary Authorization</text>
+  <text x="292" y="1023" class="b">Cloud Build CI gates: pylint · mypy --strict · pytest · eval gate = 0 uncited claims · safety suite = 0 bypasses · SBOM · Terraform (Gateway policies dry-run → enforce)</text>
+
+  <!-- ============ EXTERNAL SYSTEMS ============ -->
+  <text x="1510" y="98" class="h">EXTERNAL SYSTEMS (SaaS)</text>
+  <rect x="1510" y="110" width="270" height="70" rx="8" fill="#FFFFFF" stroke="#202124" stroke-width="1.3"/>
+  <text x="1522" y="128" class="h2">Azure DevOps</text>
+  <text x="1522" y="143" class="s">work items · backlogs · comments (REST 7.1)</text>
+  <text x="1522" y="158" class="s" fill="#C5221F" font-weight="700">READ · CREATE on approval (validateOnly)</text>
+  <text x="1522" y="172" class="s">Entra service principals (read ≠ write)</text>
+
+  <rect x="1510" y="190" width="270" height="70" rx="8" fill="#FFFFFF" stroke="#202124" stroke-width="1.3"/>
+  <text x="1522" y="208" class="h2">ServiceNow</text>
+  <text x="1522" y="223" class="s">incidents · requests · journal notes</text>
+  <text x="1522" y="238" class="s" fill="#1967D2" font-weight="700">READ only</text>
+  <text x="1522" y="252" class="s">OAuth integration user (read ACLs)</text>
+
+  <rect x="1510" y="270" width="270" height="70" rx="8" fill="#FFFFFF" stroke="#202124" stroke-width="1.3"/>
+  <text x="1522" y="288" class="h2">PagerDuty</text>
+  <text x="1522" y="303" class="s">incidents · notes · log entries (REST v2)</text>
+  <text x="1522" y="318" class="s" fill="#1967D2" font-weight="700">READ only</text>
+  <text x="1522" y="332" class="s">read-only key / scoped OAuth · Webhooks v3</text>
+
+  <rect x="1510" y="350" width="270" height="70" rx="8" fill="#FFFFFF" stroke="#202124" stroke-width="1.3"/>
+  <text x="1522" y="368" class="h2">Microsoft Graph</text>
+  <text x="1522" y="383" class="s">Outlook threads · OneDrive docs &amp; trackers</text>
+  <text x="1522" y="398" class="s" fill="#C5221F" font-weight="700">READ · internal send on approval</text>
+  <text x="1522" y="412" class="s">RBAC for Applications · Sites.Selected</text>
+
+  <rect x="1510" y="430" width="270" height="70" rx="8" fill="#FFFFFF" stroke="#202124" stroke-width="1.3"/>
+  <text x="1522" y="448" class="h2">SLB Knowledge Base</text>
+  <text x="1522" y="463" class="s">articles (adapter · backend TBC — Q-01)</text>
+  <text x="1522" y="478" class="s" fill="#C5221F" font-weight="700">READ · PUBLISH on approval</text>
+  <text x="1522" y="492" class="s">Product-team reviewers</text>
+
+  <rect x="1510" y="510" width="270" height="70" rx="8" fill="#FFFFFF" stroke="#202124" stroke-width="1.3"/>
+  <text x="1522" y="528" class="h2">Figma · SLB DLS library</text>
+  <text x="1522" y="543" class="s">REST: library read · images · comments</text>
+  <text x="1522" y="558" class="s">canvas: plugin (now) · MCP use_figma (later)</text>
+  <text x="1522" y="572" class="s" fill="#C5221F" font-weight="700">WRITE only on approval</text>
+
+  <rect x="1510" y="600" width="270" height="56" rx="8" fill="#FFFFFF" stroke="#D93025" stroke-width="1.3" stroke-dasharray="5 3"/>
+  <text x="1522" y="618" class="h2">Private SLB Figma plugin (path A)</text>
+  <text x="1522" y="633" class="s">run by approving PM/UX · renders the</text>
+  <text x="1522" y="647" class="s">token-gated compiled program</text>
+
+  <!-- ============ ARROWS ============ -->
+  <!-- Workbench <-> Ingress -->
+  <path class="blue" d="M531,156 L558,156" marker-end="url(#aBlue)"/>
+  <path class="blue" d="M559,176 L532,176" marker-end="url(#aBlue)"/>
+  <!-- Ingress -> pm-agent-core -->
+  <path class="blue" d="M617,221 L617,330" marker-end="url(#aBlue)"/>
+
+  <!-- Event gateway -> Pub/Sub -> signal-ingestion -->
+  <path class="purple" d="M1508,118 L1472,118" marker-end="url(#aPurple)"/>
+  <path class="purple" d="M1219,165 L1002,165" marker-end="url(#aPurple)"/>
+  <path class="purple" d="M900,221 L900,260" marker-end="url(#aPurple)"/>
+
+  <!-- Agents -> Agent Gateway egress -->
+  <path class="blue" d="M986,292 L1028,292" marker-end="url(#aBlue)"/>
+  <path class="blue" d="M986,447 L1028,447" marker-end="url(#aBlue)"/>
+  <path class="red" d="M986,571 L1028,571" marker-end="url(#aRed)"/>
+
+  <!-- Egress -> tool plane -->
+  <path class="blue" d="M1191,343 L1230,343" marker-end="url(#aBlue)"/>
+  <path class="red" d="M1191,455 L1230,455" marker-end="url(#aRed)"/>
+  <path class="indigo" d="M1191,571 L1230,571" marker-end="url(#aIndigo)"/>
+  <path class="gray" d="M1191,718 L1218,718" marker-end="url(#aGray)"/>
+
+  <!-- Read servers -> SaaS (blue bus) -->
+  <path class="blue" d="M1459,343 L1482,343 M1482,130 L1482,530"/>
+  <path class="blue" d="M1482,130 L1507,130" marker-end="url(#aBlue)"/>
+  <path class="blue" d="M1482,210 L1507,210" marker-end="url(#aBlue)"/>
+  <path class="blue" d="M1482,290 L1507,290" marker-end="url(#aBlue)"/>
+  <path class="blue" d="M1482,370 L1507,370" marker-end="url(#aBlue)"/>
+  <path class="blue" d="M1482,450 L1507,450" marker-end="url(#aBlue)"/>
+  <path class="blue" d="M1482,530 L1507,530" marker-end="url(#aBlue)"/>
+  <!-- Write servers -> SaaS (red bus) -->
+  <path class="red" d="M1459,455 L1496,455 M1496,165 L1496,565"/>
+  <path class="red" d="M1496,165 L1507,165" marker-end="url(#aRed)"/>
+  <path class="red" d="M1496,405 L1507,405" marker-end="url(#aRed)"/>
+  <path class="red" d="M1496,485 L1507,485" marker-end="url(#aRed)"/>
+  <path class="red" d="M1496,565 L1507,565" marker-end="url(#aRed)"/>
+  <!-- Renderer -> private plugin -> Figma -->
+  <path class="redDash" d="M1459,596 L1489,596 L1489,628 L1507,628" marker-end="url(#aRed)"/>
+  <path class="redDash" d="M1645,599 L1645,583" marker-end="url(#aRed)"/>
+
+  <!-- core -> verifier (claims) ; core -> ledger (propose) ; verifier -> ledger (signed report) -->
+  <path class="indigo" d="M455,533 L455,638" marker-end="url(#aIndigo)"/>
+  <path class="amberSolid" d="M612,533 L612,668 L618,668" marker-end="url(#aAmber)"/>
+  <path class="indigo" d="M601,720 L618,720" marker-end="url(#aIndigo)"/>
+  <!-- core -> commit-executor (A2A execute) -->
+  <path class="red" d="M800,533 L800,540" marker-end="url(#aRed)"/>
+  <!-- ledger -> commit-executor (token) -->
+  <path class="amberSolid" d="M900,639 L900,602" marker-end="url(#aAmber)"/>
+  <!-- PM decision: Workbench -> ledger, bypassing LLM -->
+  <path class="amber" d="M279,205 L270,205 L270,626 L700,626 L700,638" marker-end="url(#aAmber)"/>
+  <text transform="translate(263,585) rotate(-90)" class="s" font-weight="700" fill="#B06000">PM decision · IAP-verified identity · never via LLM</text>
+
+  <!-- data access -->
+  <path class="gray" d="M440,786 L440,804 M810,786 L810,804 M1345,786 L1345,804"/>
+
+  <!-- ============ FLOW NUMBERS ============ -->
+  <g>
+    <circle cx="918" cy="241" r="8" fill="#9334E6"/><text x="918" y="245" class="num" text-anchor="middle">1</text>
+    <circle cx="1007" cy="433" r="8" fill="#1A73E8"/><text x="1007" y="437" class="num" text-anchor="middle">2</text>
+    <circle cx="455" cy="588" r="8" fill="#3949AB"/><text x="455" y="592" class="num" text-anchor="middle">3</text>
+    <text x="468" y="592" class="s" font-weight="700" fill="#283593">claims + citations</text>
+    <circle cx="612" cy="562" r="8" fill="#E37400"/><text x="612" y="566" class="num" text-anchor="middle">4</text>
+    <text x="600" y="566" class="s" font-weight="700" fill="#B06000" text-anchor="end">propose</text>
+    <circle cx="270" cy="604" r="8" fill="#E37400"/><text x="270" y="608" class="num" text-anchor="middle">5</text>
+    <circle cx="900" cy="620" r="8" fill="#E37400"/><text x="900" y="624" class="num" text-anchor="middle">6</text>
+    <text x="912" y="624" class="s" font-weight="700" fill="#B06000">single-use token</text>
+    <circle cx="1007" cy="557" r="8" fill="#D93025"/><text x="1007" y="561" class="num" text-anchor="middle">7</text>
+  </g>
+
+  <!-- ============ LEGEND ============ -->
+  <text x="20" y="1078" class="h">LEGEND</text>
+  <path class="blue" d="M20,1098 L60,1098" marker-end="url(#aBlue)"/>
+  <text x="68" y="1102" class="b">Read path: agent → Agent Gateway egress → read MCP server → SaaS</text>
+  <path class="red" d="M520,1098 L560,1098" marker-end="url(#aRed)"/>
+  <text x="568" y="1102" class="b">Write path: only after PM approval + single-use token (commit-executor)</text>
+  <path class="amber" d="M1060,1098 L1100,1098" marker-end="url(#aAmber)"/>
+  <text x="1108" y="1102" class="b">HITL: propose · PM decision via IAP (bypasses the LLM) · token</text>
+
+  <path class="indigo" d="M20,1122 L60,1122" marker-end="url(#aIndigo)"/>
+  <text x="68" y="1126" class="b">Verification: claims + citations → signed VerificationReport</text>
+  <path class="purple" d="M520,1122 L560,1122" marker-end="url(#aPurple)"/>
+  <text x="568" y="1126" class="b">Change hints: vendor webhooks / schedule (ids only)</text>
+  <rect x="1060" y="1114" width="40" height="15" rx="7" fill="#1A73E8"/>
+  <text x="1080" y="1125" class="badge" text-anchor="middle">AID-*</text>
+  <text x="1108" y="1126" class="b">Agent Identity (SPIFFE) per Agent Runtime deployment</text>
+
+  <rect x="20" y="1140" width="14" height="14" rx="3" fill="#E8F0FE" stroke="#1A73E8"/><text x="40" y="1151" class="s">Agent Runtime</text>
+  <rect x="130" y="1140" width="14" height="14" rx="3" fill="#E6F4EA" stroke="#188038"/><text x="150" y="1151" class="s">Cloud Run</text>
+  <rect x="222" y="1140" width="14" height="14" rx="3" fill="#F3E8FD" stroke="#9334E6"/><text x="242" y="1151" class="s">GKE Autopilot</text>
+  <rect x="330" y="1140" width="14" height="14" rx="3" fill="#E0F2F1" stroke="#00796B"/><text x="350" y="1151" class="s">Agent Gateway</text>
+  <rect x="440" y="1140" width="14" height="14" rx="3" fill="#E8EAF6" stroke="#3949AB"/><text x="460" y="1151" class="s">Grounding / Verifier</text>
+  <rect x="574" y="1140" width="14" height="14" rx="3" fill="#FEF3E0" stroke="#E37400"/><text x="594" y="1151" class="s">HITL Ledger</text>
+  <rect x="674" y="1140" width="14" height="14" rx="3" fill="#FFFFFF" stroke="#202124"/><text x="694" y="1151" class="s">External SaaS</text>
+
+  <text x="800" y="1151" class="s" font-weight="700" fill="#202124">Flow:</text>
+  <circle cx="842" cy="1147" r="7" fill="#9334E6"/><text x="842" y="1151" class="num" text-anchor="middle">1</text><text x="853" y="1151" class="s">ingest</text>
+  <circle cx="900" cy="1147" r="7" fill="#1A73E8"/><text x="900" y="1151" class="num" text-anchor="middle">2</text><text x="911" y="1151" class="s">analyse &amp; draft (read-only)</text>
+  <circle cx="1048" cy="1147" r="7" fill="#3949AB"/><text x="1048" y="1151" class="num" text-anchor="middle">3</text><text x="1059" y="1151" class="s">verify</text>
+  <circle cx="1104" cy="1147" r="7" fill="#E37400"/><text x="1104" y="1151" class="num" text-anchor="middle">4</text><text x="1115" y="1151" class="s">propose</text>
+  <circle cx="1170" cy="1147" r="7" fill="#E37400"/><text x="1170" y="1151" class="num" text-anchor="middle">5</text><text x="1181" y="1151" class="s">PM approves</text>
+  <circle cx="1260" cy="1147" r="7" fill="#E37400"/><text x="1260" y="1151" class="num" text-anchor="middle">6</text><text x="1271" y="1151" class="s">token</text>
+  <circle cx="1312" cy="1147" r="7" fill="#D93025"/><text x="1312" y="1151" class="num" text-anchor="middle">7</text><text x="1323" y="1151" class="s">commit by zero-LLM executor</text>
+
+  <text x="20" y="1178" class="s">Every agent tool call traverses Agent Gateway egress under a per-deployment Agent Identity; analysis identities can only reach read-only tools; only AID-COMMIT reaches write tools, and only with an approval token minted after an IAP-authenticated PM decision.</text>
+</svg>

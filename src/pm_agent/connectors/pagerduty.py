@@ -38,7 +38,7 @@ from pm_agent.connectors.common import (
 from pm_agent.connectors.entities import EntityResolver, resolve_customer, resolve_product
 from pm_agent.connectors.http import HttpRequest, Transport, UnconfiguredTransport
 from pm_agent.grounding.redaction import Redactor
-from pm_agent.placeholders import is_placeholder, require
+from pm_agent.placeholders import is_placeholder, not_implemented, require
 from pm_agent.schemas import RecordType, Signal, SourceSystem
 from pm_agent.settings import Settings
 
@@ -46,7 +46,7 @@ QUESTION = "Q-07"
 CONNECTOR = "mcp-pagerduty"
 MAX_LIMIT = 100
 ACCEPT = "application/vnd.pagerduty+json;version=2"
-_ID = re.compile(r"^[A-Za-z0-9]{1,40}$")
+_ID = re.compile(r"[A-Za-z0-9]{1,40}")  # always ``fullmatch``: ``$`` would also accept a trailing newline
 
 
 def pagerduty_permalink(web_base: str, incident_id: str) -> str:
@@ -55,7 +55,7 @@ def pagerduty_permalink(web_base: str, incident_id: str) -> str:
 
 
 def _check_id(value: str) -> str:
-    if not _ID.match(value):
+    if not _ID.fullmatch(value):
         raise ValueError(f"invalid PagerDuty id {value!r}")
     return value
 
@@ -199,21 +199,30 @@ class HttpPagerDutyConnector:
     @classmethod
     def from_settings(cls, settings: Settings, redactor: Redactor, *, transport: Transport | None = None,
                       entities: EntityResolver | None = None) -> "HttpPagerDutyConnector":
+        """Build from ``connectors.pagerduty``; placeholder service scopes fail closed rather than widening."""
         cfg = settings.connectors.get("pagerduty") or {}
         services = require(cfg.get("service_ids"), strict=settings.strict)
-        service_ids = [str(s) for s in services] if isinstance(services, list) else \
-            ([] if services is None or is_placeholder(services) else [str(services)])
+        # Keep placeholder tokens in the scope list so every call refuses instead of widening to all services.
+        service_ids = [str(s) for s in services] if isinstance(services, list) else (
+            [] if services is None else [str(services)])
         return cls(redactor=redactor, api_base=str(cfg.get("api_base") or "https://api.pagerduty.com"),
                    service_ids=service_ids, entities=entities or EntityResolver.from_settings(settings),
                    transport=transport)
+
+    def _send(self, request: HttpRequest) -> Any:
+        if any(is_placeholder(service_id) for service_id in self._service_ids):
+            not_implemented(QUESTION, "pagerduty service_ids in scope (a placeholder never widens to all services)")
+        return self._transport.send(request)
 
     def _normalize(self, raw: Mapping[str, Any]) -> Signal:
         return normalize_pagerduty_incident(raw, redactor=self._redactor, entities=self._entities, ctx=self._ctx)
 
     def _incidents(self, cursor: str | None, limit: int) -> tuple[list[dict[str, Any]], str | None]:
         since = require_timestamp(cursor) if cursor else None
-        response = self._transport.send(self._api.incidents(since, service_ids=self._service_ids,
-                                                            limit=checked_limit(limit)))
+        if any(is_placeholder(service_id) for service_id in self._service_ids):
+            not_implemented(QUESTION, "pagerduty service_ids in scope (a placeholder never widens to all services)")
+        response = self._send(self._api.incidents(since, service_ids=self._service_ids,
+                                                  limit=checked_limit(limit)))
         incidents = [dict(i) for i in response.get("incidents") or []]
         # ``since`` filters on creation time [K]; updates to older incidents arrive through webhook hints + get().
         return incidents, newest_timestamp(i.get("created_at") for i in incidents) or cursor
@@ -233,7 +242,7 @@ class HttpPagerDutyConnector:
 
     def _raw(self, incident_id: str) -> dict[str, Any] | None:
         try:
-            response = self._transport.send(self._api.incident(incident_id))
+            response = self._send(self._api.incident(incident_id))
         except ConnectorError as exc:
             if exc.code == "not_found":
                 return None
@@ -242,23 +251,23 @@ class HttpPagerDutyConnector:
         return dict(incident) if isinstance(incident, Mapping) else None
 
     def get(self, record_id: str) -> Signal | None:
-        raw = self._raw(record_id) if _ID.match(record_id) else None
+        raw = self._raw(record_id) if _ID.fullmatch(record_id) else None
         return self._normalize(raw) if raw else None
 
     def _notes_for(self, parent: Signal, api_id: str) -> list[Signal]:
-        response = self._transport.send(self._api.notes(api_id))
+        response = self._send(self._api.notes(api_id))
         return [normalize_pagerduty_note(n, redactor=self._redactor, parent=parent, ctx=self._ctx)
                 for n in response.get("notes") or []]
 
     def _logs_for(self, parent: Signal, api_id: str) -> list[Signal]:
-        response = self._transport.send(self._api.log_entries(api_id))
+        response = self._send(self._api.log_entries(api_id))
         return [normalize_pagerduty_log_entry(e, redactor=self._redactor, parent=parent, ctx=self._ctx)
                 for e in response.get("log_entries") or []]
 
     def notes(self, incident: str) -> list[Signal]:
-        raw = self._raw(incident) if _ID.match(incident) else None
+        raw = self._raw(incident) if _ID.fullmatch(incident) else None
         return self._notes_for(self._normalize(raw), first_text(raw.get("id"))) if raw else []
 
     def log_entries(self, incident: str) -> list[Signal]:
-        raw = self._raw(incident) if _ID.match(incident) else None
+        raw = self._raw(incident) if _ID.fullmatch(incident) else None
         return self._logs_for(self._normalize(raw), first_text(raw.get("id"))) if raw else []

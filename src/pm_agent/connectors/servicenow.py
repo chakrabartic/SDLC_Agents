@@ -4,8 +4,12 @@
   ``case`` signal (``source_record_id`` = number, ``source_version`` = ``sys_mod_count``, permalink
   ``{instance}/{table}.do?sys_id=…``); ``sys_journal_field`` entry → child ``journal_note`` signal.
 * ``ServiceNowApi``: Table API delta (``sys_updated_on>=cursor^ORDERBYsys_updated_on``) and journal reads. Every value
-  that enters an encoded query is validated (tables, sys_ids, numbers, timestamps) — no query injection.
-* ``FixtureServiceNowConnector`` and ``HttpServiceNowConnector`` (OAuth integration user / instance are Q-05).
+  that enters an encoded query is validated (tables, sys_ids, numbers, timestamps) — no query injection. Validators
+  ``fullmatch`` ASCII character classes: ``$`` also matches before a trailing newline and ``\\d`` matches any Unicode
+  digit, so ``.match(r"^…\\d…$")`` let ``"INC0000001\\n"`` or Arabic-Indic digits through.
+* ``FixtureServiceNowConnector`` and ``HttpServiceNowConnector`` (OAuth integration user / instance are Q-05). The
+  opaque ``sn1:`` cursor carries per-table watermarks; any malformed cursor — including JSON nested deeply enough to
+  make the decoder raise ``RecursionError`` — is a typed ``validation_failed``.
 
 Open item: ``PLACEHOLDER:Q-05:servicenow_oauth_client`` (read-only integration user, Application Registry).
 """
@@ -53,10 +57,10 @@ RECORD_TYPES: dict[str, RecordType] = {
 NUMBER_PREFIXES = {"INC": "incident", "REQ": "sc_request", "RITM": "sc_req_item", "CS": "sn_customerservice_case"}
 JOURNAL_FIELDS = "sys_id,element,element_id,name,value,sys_created_on,sys_created_by"
 _JOURNAL_TITLES = {"work_notes": "Work note", "comments": "Additional comment"}
-_TABLE = re.compile(r"^[a-z0-9_]{1,80}$")
-_SYS_ID = re.compile(r"^[0-9a-f]{32}$")
-_NUMBER = re.compile(r"^(INC|REQ|RITM|CS)\d{7,10}$")
-_SNOW_DATETIME = re.compile(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
+_TABLE = re.compile(r"[a-z0-9_]{1,80}")
+_SYS_ID = re.compile(r"[0-9a-f]{32}")
+_NUMBER = re.compile(r"(INC|REQ|RITM|CS)[0-9]{7,10}")
+_SNOW_DATETIME = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}")
 _CURSOR_PREFIX = "sn1:"
 
 
@@ -73,13 +77,13 @@ def _display(field: object) -> str:
 
 
 def _check_table(table: str) -> str:
-    if not _TABLE.match(table):
+    if not _TABLE.fullmatch(table):
         raise ValueError(f"invalid table name {table!r}")
     return table
 
 
 def _check_sys_id(sys_id: str) -> str:
-    if not _SYS_ID.match(sys_id):
+    if not _SYS_ID.fullmatch(sys_id):
         raise ValueError("sys_id must be 32 lowercase hex characters")
     return sys_id
 
@@ -141,7 +145,7 @@ class ServiceNowApi:
 
     @staticmethod
     def delta_query(since: str | None) -> str:
-        if since is not None and not _SNOW_DATETIME.match(since):
+        if since is not None and not _SNOW_DATETIME.fullmatch(since):
             raise ValueError("since must be 'YYYY-MM-DD HH:MM:SS' (UTC)")
         return (f"sys_updated_on>={since}^" if since else "") + "ORDERBYsys_updated_on"
 
@@ -156,7 +160,7 @@ class ServiceNowApi:
                            params=tuple(params), headers={"Accept": "application/json"})
 
     def by_number(self, table: str, number: str) -> HttpRequest:
-        if not _NUMBER.match(number):
+        if not _NUMBER.fullmatch(number):
             raise ValueError(f"invalid record number {number!r}")
         return HttpRequest(method="GET", url=f"{self._base}/api/now/table/{_check_table(table)}",
                            params=(("sysparm_query", f"number={number}"), ("sysparm_display_value", "all"),
@@ -204,17 +208,27 @@ def _encode_cursor(watermarks: Mapping[str, str]) -> str:
     return _CURSOR_PREFIX + base64.urlsafe_b64encode(json.dumps(dict(watermarks), sort_keys=True).encode()).decode()
 
 
+def _is_watermark(value: object) -> bool:
+    """A ``sys_updated_on`` value that is shaped right *and* names a real instant (``2026-02-30`` is neither)."""
+    return isinstance(value, str) and bool(_SNOW_DATETIME.fullmatch(value)) and parse_utc(value) is not None
+
+
 def _decode_cursor(cursor: str | None) -> dict[str, str]:
+    """Per-table watermarks of an ``sn1:`` cursor (client input via MCP); anything malformed is ``validation_failed``.
+
+    ``RecursionError`` is caught with the decoding errors: ``json`` raises it, not ``ValueError``, for deeply nested
+    input (``binascii.Error`` and ``JSONDecodeError`` are ``ValueError``s).
+    """
     if not cursor:
         return {}
     try:
         if not cursor.startswith(_CURSOR_PREFIX):
             raise ValueError("prefix")
         data = json.loads(base64.urlsafe_b64decode(cursor[len(_CURSOR_PREFIX):].encode()))
-    except (ValueError, binascii.Error) as exc:
+    except (ValueError, binascii.Error, RecursionError) as exc:
         raise ConnectorError("validation_failed", "unrecognized cursor") from exc
-    if not isinstance(data, dict) or not all(isinstance(k, str) and _TABLE.match(k) and isinstance(v, str)
-                                             and _SNOW_DATETIME.match(v) for k, v in data.items()):
+    if not isinstance(data, dict) or not all(isinstance(k, str) and _TABLE.fullmatch(k) and _is_watermark(v)
+                                             for k, v in data.items()):
         raise ConnectorError("validation_failed", "unrecognized cursor")
     return data
 
@@ -285,12 +299,12 @@ class HttpServiceNowConnector:
         return PollResult(source=self.source, signals=signals, next_cursor=next_cursor)
 
     def _fetch(self, record_id: str) -> tuple[dict[str, Any], str] | None:
-        if _NUMBER.match(record_id):
+        if _NUMBER.fullmatch(record_id):
             prefix = next(p for p in sorted(NUMBER_PREFIXES, key=len, reverse=True) if record_id.startswith(p))
             table = NUMBER_PREFIXES[prefix]
             rows = self._rows(self._send(self._api.by_number(table, record_id)))
             return (rows[0], table) if rows else None
-        if _SYS_ID.match(record_id):
+        if _SYS_ID.fullmatch(record_id):
             for table in self._tables:
                 try:
                     rows = self._rows(self._send(self._api.record(table, record_id)))

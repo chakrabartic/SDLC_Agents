@@ -9,7 +9,7 @@ import pytest
 
 from pm_agent.crypto import LocalEcdsaSigner, b64url_encode
 from pm_agent.hitl.catalog import ActionCatalog, UnknownAction
-from pm_agent.hitl.ledger import GENESIS_HASH, InMemoryLedgerStore, Ledger, SqliteLedgerStore
+from pm_agent.hitl.ledger import GENESIS_HASH, InMemoryLedgerStore, Ledger, NewEntry, SqliteLedgerStore
 from pm_agent.hitl.tokens import TokenError, mint_token, verify_token
 from pm_agent.schemas import ActionType, Actor, ApprovalTokenClaims, LedgerEntryType, SubjectRef, content_sha256
 from tests.support import local_settings
@@ -159,3 +159,57 @@ def test_catalog_maps_every_action_to_one_write_tool_and_approver_rule() -> None
     assert "create_work_item" in catalog.write_tools()
     with pytest.raises(UnknownAction):
         catalog.get("DELETE_PROJECT")
+
+
+# --------------------------------------------------------------------------------------- atomic batches (S2)
+def _batch() -> list[NewEntry]:
+    return [NewEntry(LedgerEntryType.TOKEN_CONSUMED, EXECUTOR, {"action_id": "act_1", "jti": "tok_1"}, trace_id="t1"),
+            NewEntry(LedgerEntryType.COMMIT_STARTED, EXECUTOR, {"action_id": "act_1"}, trace_id="t1")]
+
+
+@pytest.mark.parametrize("store_factory", [InMemoryLedgerStore, lambda: SqliteLedgerStore(":memory:")])
+def test_record_many_appends_one_chained_batch(store_factory) -> None:  # type: ignore[no-untyped-def]
+    ledger = Ledger(store_factory())
+    first = ledger.record(LedgerEntryType.ACTION_PROPOSED, actor=AGENT, subject_refs=[PROBLEM],
+                          payload={"action_id": "act_1"})
+    consumed, started = ledger.record_many(_batch())
+    assert [first.seq, consumed.seq, started.seq] == [1, 2, 3]
+    assert consumed.prev_hash == first.entry_hash and started.prev_hash == consumed.entry_hash
+    assert (consumed.trace_id, started.payload) == ("t1", {"action_id": "act_1"})
+    assert ledger.verify_chain().ok and ledger.record_many([]) == []
+    assert [e.entry_type for e in ledger.query(action_id="act_1")] == [
+        LedgerEntryType.ACTION_PROPOSED, LedgerEntryType.TOKEN_CONSUMED, LedgerEntryType.COMMIT_STARTED]
+
+
+def test_record_many_checks_every_payload_before_writing_any() -> None:
+    ledger = Ledger(InMemoryLedgerStore())
+    oversized = NewEntry(LedgerEntryType.COMMIT_STARTED, EXECUTOR, {"action_id": "act_1", "text": "x" * 600})
+    with pytest.raises(ValueError, match="ids and hashes"):
+        ledger.record_many([_batch()[0], oversized])
+    assert ledger.head() is None
+
+
+@pytest.mark.parametrize("store_factory", [InMemoryLedgerStore, lambda: SqliteLedgerStore(":memory:")])
+def test_store_append_many_is_all_or_nothing(store_factory) -> None:  # type: ignore[no-untyped-def]
+    source = Ledger(InMemoryLedgerStore())
+    first, second, third = source.record_many(_batch() + [_batch()[1]])
+    store = store_factory()
+    with pytest.raises(ValueError, match="gap"):
+        store.append_many([first, third])  # seq 1 then 3: the valid first entry must not be kept
+    assert store.head() is None and list(store.entries()) == []
+    store.append_many([first, second])
+    store.append_many([third])
+    assert [e.seq for e in store.entries()] == [1, 2, 3] and Ledger(store).verify_chain().ok
+
+
+def test_sqlite_batch_survives_reopen_and_rolls_back_on_failure(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    path = tmp_path / "ledger.db"
+    ledger = Ledger(SqliteLedgerStore(path))
+    ledger.record_many(_batch())
+    broken = SqliteLedgerStore(path)
+    entries = list(broken.entries())
+    with pytest.raises(sqlite3.IntegrityError):
+        broken.append_many([entries[1].model_copy(update={"seq": 3, "entry_id": "led_new"}),
+                            entries[1].model_copy(update={"seq": 4})])  # duplicate entry_id: UNIQUE fails
+    reopened = Ledger(SqliteLedgerStore(path))
+    assert [e.seq for e in reopened.query()] == [1, 2] and reopened.verify_chain().ok

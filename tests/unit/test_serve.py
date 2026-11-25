@@ -43,7 +43,7 @@ def test_every_documented_component_resolves() -> None:
     assert kinds["pm-workbench"] == kinds["svc-prototype-renderer"] == "asgi"
     assert all(kind == "mcp" for name, kind in kinds.items() if name.startswith("mcp-"))
     assert serve.resolve_component("pm-workbench").target == "pm_agent.workbench.app:create_app"
-    assert serve.resolve_component("svc-prototype-renderer").target == "pm_agent.renderer.app:create_app"
+    assert serve.resolve_component("svc-prototype-renderer").target == "pm_agent.runtime:renderer_app"
     assert serve.resolve_component("dls-catalog-sync").target == "pm_agent.jobs.dls_catalog_sync:main"
     assert serve.resolve_component("ledger-anchor").target == "pm_agent.jobs.ledger_anchor:main"
 

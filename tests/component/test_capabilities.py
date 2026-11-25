@@ -52,7 +52,7 @@ async def _committed_requirement():  # type: ignore[no-untyped-def]
     services, problem = _services_with_problem()
     session, paused, approval = await _run_to_approval(services, problem)
     action_id = approval.payload["action_id"]
-    services.approvals.decide(action_id=action_id, decision=Decision.APPROVE, assertion=services.identity.issue(PM))
+    services.approval_service.decide(action_id=action_id, decision=Decision.APPROVE, assertion=services.identity.issue(PM))
     await session.send(decision_resume(approval.interrupt_id, action_id=action_id, decision="approve"),
                        invocation_id=paused.invocation_id)
     return services, problem
@@ -62,7 +62,7 @@ async def _approve_and_resume(services, session, turn, *people):  # type: ignore
     [pause] = turn.interrupts
     action_id = pause.payload["action_id"]
     for person in people:
-        services.approvals.decide(action_id=action_id, decision=Decision.APPROVE,
+        services.approval_service.decide(action_id=action_id, decision=Decision.APPROVE,
                                   assertion=services.identity.issue(person))
     return await session.send(decision_resume(pause.interrupt_id, action_id=action_id, decision="approve"),
                               invocation_id=turn.invocation_id)
@@ -77,7 +77,7 @@ async def test_prototype_reuses_dls_and_needs_pm_and_ux_before_rendering() -> No
     [pause] = turn.interrupts
     action = services.approvals.get_action(pause.payload["action_id"])
     assert action.payload["reuse_ratio"] == 1.0 and "dls:banner/warning" in action.payload["component_keys"]
-    services.approvals.decide(action_id=action.action_id, decision=Decision.APPROVE,
+    services.approval_service.decide(action_id=action.action_id, decision=Decision.APPROVE,
                               assertion=services.identity.issue(PM))
     renderer = services.write_backends["svc-prototype-renderer"]
     assert renderer.calls == []  # PM alone is not enough (two-person rule)

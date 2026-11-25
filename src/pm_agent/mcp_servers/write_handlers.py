@@ -22,9 +22,8 @@ from pm_agent.connectors.figma import FigmaApi, figma_comment_permalink
 from pm_agent.connectors.http import Transport, UnconfiguredTransport
 from pm_agent.connectors.kb import HttpKbAdapter, KbAdapter, PublishRequiresWorkflow
 from pm_agent.connectors.msgraph import GraphApi
-from pm_agent.gateway import ToolCallError
+from pm_agent.gateway import ToolCallError, WriteHandler
 from pm_agent.grounding.policy import PolicyEngine
-from pm_agent.mcp_servers.write_server import WriteHandler
 from pm_agent.placeholders import is_placeholder, not_implemented
 from pm_agent.schemas import ActionType, TraceLink
 from pm_agent.settings import Settings
@@ -45,11 +44,11 @@ def _field(payload: Mapping[str, Any], name: str) -> Any:
 
 
 def _check_target(target: Mapping[str, Any], system: str, **expected: str) -> None:
-    """The approved ``tgt`` must name this server's system (and org/project where given)."""
-    if target.get("system") not in (None, system):
+    """The approved ``tgt`` must name this server's system and every required scope key (fail-closed)."""
+    if target.get("system") != system:
         raise ToolCallError("unauthorized", f"approved target system {target.get('system')!r} is not {system!r}")
     for key, value in expected.items():
-        if target.get(key) not in (None, value):
+        if target.get(key) != value:
             raise ToolCallError("unauthorized", f"approved target {key} does not match this server")
 
 
@@ -62,7 +61,7 @@ def ado_write_handlers(*, organization: str, project: str, transport: Transport 
     def create_work_item(*, payload: Any, target: dict[str, Any], validate_only: bool,
                          idempotency_key: str) -> dict[str, Any]:
         body = _object(payload)
-        _check_target(target, "ado", org=organization, project=project)
+        _check_target(target, "ado", organization=organization, project=project)
         fields = _field(body, "fields")
         if not isinstance(fields, Mapping):
             raise ToolCallError("validation_failed", "payload.fields must be an object")
@@ -83,7 +82,7 @@ def ado_write_handlers(*, organization: str, project: str, transport: Transport 
                       idempotency_key: str) -> dict[str, Any]:
         del idempotency_key  # relation existence check + test /rev make the PATCH safe to retry
         body = _object(payload)
-        _check_target(target, "ado", org=organization, project=project)
+        _check_target(target, "ado", organization=organization, project=project)
         try:
             request = api.add_relations(int(_field(body, "work_item_id")), rev=int(_field(body, "rev")),
                                         relations=list(_field(body, "relations")), validate_only=validate_only)

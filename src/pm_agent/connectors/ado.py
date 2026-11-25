@@ -6,6 +6,9 @@
   ``workitemsbatch`` (≤ 200 ids, ``$expand=Relations``), comments (7.1-preview.4), create as JSON Patch with
   ``validateOnly`` pre-flight (``bypassRules`` is never sent) and relation adds guarded by ``test /rev``.
 * ``FixtureAdoConnector`` (synthetic JSON) and ``HttpAdoConnector`` (real client; transport/credentials are Q-04).
+  ``workitemsbatch`` is sent with ``errorPolicy=Omit``, so a deleted or inaccessible id comes back as ``null``: such
+  entries are dropped and ``get`` reports the item as not found. Area paths narrow the change delta; a placeholder
+  scope is *unconfigured* (every call refuses with Q-04), never "the whole project".
 
 Open item: ``PLACEHOLDER:Q-04:ado_rest_credentials`` (Entra service principals for the read/write servers).
 """
@@ -21,6 +24,7 @@ from urllib.parse import quote
 
 from pm_agent.connectors.base import ConnectorError, PollResult, make_signal
 from pm_agent.connectors.common import (
+    as_mapping,
     FixtureConnectorBase,
     FixtureUnit,
     IngestContext,
@@ -44,10 +48,12 @@ from pm_agent.settings import Settings
 API_VERSION = "7.1"
 COMMENTS_API_VERSION = "7.1-preview.4"
 MAX_BATCH = 200
+MAX_WORK_ITEM_ID = 2**31 - 1  # work item ids are positive int32 (REST 7.1)
 QUESTION = "Q-04"
 CONNECTOR = "mcp-ado"
 RELATION_TYPES = frozenset({"System.LinkTypes.Related", "Hyperlink"})
-_FIELD_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_.]*$")
+_FIELD_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_.]*")
+_WORK_ITEM_ID = re.compile(r"[1-9][0-9]{0,9}")
 _TEXT_FIELDS = (("System.Description", "Description"), ("Microsoft.VSTS.TCM.ReproSteps", "Repro steps"),
                 ("Microsoft.VSTS.Common.AcceptanceCriteria", "Acceptance criteria"),
                 ("Microsoft.VSTS.TCM.SystemInfo", "System info"))
@@ -60,6 +66,18 @@ def ado_permalink(organization: str, project: str, work_item_id: int | str) -> s
     """``https://dev.azure.com/{org}/{project}/_workitems/edit/{id}`` (docs/09 §2)."""
     return (f"https://dev.azure.com/{quote(organization, safe='')}/{quote(project, safe='')}/_workitems/edit/"
             f"{quote(str(work_item_id), safe='')}")
+
+
+def parse_work_item_id(value: str) -> int | None:
+    """*value* as a work item id — ASCII digits, no sign/space/leading zero, positive int32 — else ``None``.
+
+    ``str.isdigit`` is not enough: ``"²".isdigit()`` is true but ``int("²")`` raises, and ``"٣"`` would silently read
+    work item 3.
+    """
+    if not _WORK_ITEM_ID.fullmatch(value):
+        return None
+    number = int(value)
+    return number if number <= MAX_WORK_ITEM_ID else None
 
 
 def _identity(value: object) -> str | None:
@@ -85,7 +103,7 @@ def _work_item_text(fields: Mapping[str, Any]) -> str:
 def normalize_ado_work_item(raw: Mapping[str, Any], *, redactor: Redactor, organization: str, project: str,
                             entities: EntityResolver | None = None, ctx: IngestContext | None = None) -> Signal:
     """One work item revision (``workitemsbatch`` element) → redacted ``work_item`` signal."""
-    fields: Mapping[str, Any] = raw.get("fields") or {}
+    fields = as_mapping(raw.get("fields"))
     work_item_id = first_text(raw.get("id"), fields.get("System.Id"))
     if not work_item_id:
         raise ConnectorError("validation_failed", "work item without id")
@@ -205,7 +223,7 @@ class AdoApi:
             values["System.Tags"] = f"{existing}; {idempotency_tag}" if existing else idempotency_tag
         ops: list[dict[str, Any]] = []
         for name, value in values.items():
-            if not _FIELD_NAME.match(name):
+            if not _FIELD_NAME.fullmatch(name):
                 raise ValueError(f"invalid field reference name {name!r}")
             ops.append({"op": "add", "path": f"/fields/{name}", "value": value})
         ops += self._relation_ops(relations)
@@ -266,9 +284,9 @@ class HttpAdoConnector:
     def from_settings(cls, settings: Settings, redactor: Redactor, *, transport: Transport | None = None,
                       entities: EntityResolver | None = None) -> "HttpAdoConnector":
         cfg = settings.connectors.get("ado") or {}
-        areas = cfg.get("area_paths")
-        area_paths = [str(a) for a in areas] if isinstance(areas, list) else \
-            ([] if areas is None or is_placeholder(areas) else [str(areas)])
+        areas = require(cfg.get("area_paths"), strict=settings.strict)
+        # A placeholder stays in the scope list so every call refuses (``_send``) instead of reading the whole project.
+        area_paths = [str(a) for a in areas] if isinstance(areas, list) else ([] if areas is None else [str(areas)])
         return cls(organization=str(require(cfg.get("organization", ""), strict=settings.strict)),
                    project=str(require(cfg.get("project", ""), strict=settings.strict)), redactor=redactor,
                    api_version=str(cfg.get("api_version") or API_VERSION), area_paths=area_paths,
@@ -276,17 +294,21 @@ class HttpAdoConnector:
 
     def _send(self, request: HttpRequest) -> Any:
         if is_placeholder(self._organization) or is_placeholder(self._project):
-            not_implemented("Q-04", "ado organization/project in scope")
+            not_implemented(QUESTION, "ado organization/project in scope")
+        if any(is_placeholder(path) for path in self._area_paths):
+            not_implemented(QUESTION, "ado area paths in scope (a placeholder never widens to the whole project)")
         return self._transport.send(request)
 
     def _normalize(self, raw: Mapping[str, Any]) -> Signal:
         return normalize_ado_work_item(raw, redactor=self._redactor, organization=self._organization,
                                        project=self._project, entities=self._entities, ctx=self._ctx)
 
-    def _batch(self, ids: Sequence[int]) -> list[dict[str, Any]]:
-        items: list[dict[str, Any]] = []
+    def _batch(self, ids: Sequence[int]) -> list[Mapping[str, Any]]:
+        """``workitemsbatch`` in chunks of 200; ``null`` entries (``errorPolicy=Omit``, deleted) are dropped."""
+        items: list[Mapping[str, Any]] = []
         for start in range(0, len(ids), MAX_BATCH):
-            items += list(self._send(self._api.workitems_batch(ids[start:start + MAX_BATCH])).get("value") or [])
+            values = as_mapping(self._send(self._api.workitems_batch(ids[start:start + MAX_BATCH]))).get("value")
+            items += [item for item in values if isinstance(item, Mapping)] if isinstance(values, list) else []
         return items
 
     def poll_records(self, cursor: str | None, limit: int = 100) -> PollResult:
@@ -298,7 +320,7 @@ class HttpAdoConnector:
         items = self._batch(ids) if ids else []
         return PollResult(source=self.source, signals=[self._normalize(item) for item in items],
                           next_cursor=newest_timestamp(
-                              [(item.get("fields") or {}).get("System.ChangedDate") for item in items]) or cursor)
+                              [as_mapping(item.get("fields")).get("System.ChangedDate") for item in items]) or cursor)
 
     def poll(self, cursor: str | None, limit: int = 100) -> PollResult:
         records = self.poll_records(cursor, limit)
@@ -308,9 +330,11 @@ class HttpAdoConnector:
         return PollResult(source=self.source, signals=signals, next_cursor=records.next_cursor)
 
     def get(self, record_id: str) -> Signal | None:
-        if not record_id.isdigit():
+        """Re-read one work item: ``None`` when *record_id* cannot be a work item id or the item no longer exists."""
+        work_item_id = parse_work_item_id(record_id)
+        if work_item_id is None:
             return None
-        items = self._batch([int(record_id)])
+        items = self._batch([work_item_id])
         return self._normalize(items[0]) if items else None
 
     def _comments_for(self, parent: Signal) -> list[Signal]:
